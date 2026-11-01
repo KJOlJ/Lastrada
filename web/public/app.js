@@ -60,6 +60,7 @@ const placements = {
 function notice(message) {
   $("#notice").textContent = message;
   $("#notice").hidden = !message;
+  if (message) $("#notice").scrollIntoView({ block: "nearest" });
 }
 function button(label, action, primary = false) {
   return `<button data-action="${action}" class="${primary ? "primary" : ""}">${label}</button>`;
@@ -155,7 +156,7 @@ function render() {
   if (!analysis) return;
   if (step === 2) {
     frame(
-      `<h1>Listen & check.</h1><p class="muted">Accept the moments you hear, or unlock the table to correct them. Original-track times may be unavailable for fallback estimates.</p><div class="grid"><div><h3>The original</h3><audio controls id="originalPlayer"></audio></div><div><h3>Your track</h3><audio controls id="newPlayer"></audio></div></div>${(analysis.warnings || []).map((w) => `<p class="warning">${esc(w)}</p>`).join("")}<details><summary>See how the tracks compare</summary><div id="spectral"></div></details>${Object.keys(forms).map(renderTimes).join("")}<details><summary>Explore instruments · optional</summary><p class="muted">One short paired region, four estimated stems. Completed results are reused. This check is not needed for the document.</p>${analysis.stem_evidence?.length ? `<p>Instrument check completed.</p><pre>${esc(analysis.stem_evidence.map((x) => `${x.source_stem} → ${x.new_song_stem}: ${x.interpretation}`).join("\n"))}</pre>` : button("Explore instruments", "stems")}</details>${nav("Next: Describe the sound →")}`,
+      `<h1>Listen & check.</h1><p class="muted">Accept the moments you hear, or unlock the table to correct them. Original-track times may be unavailable for fallback estimates.</p><p class="muted">Used the original audio without recording a separate replay? Confirm the recording sample, accept its times, and choose “No separate replay or re-sung part” below. You do not need timestamps for a use that did not happen.</p><div class="grid"><div><h3>The original</h3><audio controls id="originalPlayer"></audio></div><div><h3>Your track</h3><audio controls id="newPlayer"></audio></div></div>${(analysis.warnings || []).map((w) => `<p class="warning">${esc(w)}</p>`).join("")}<details><summary>See how the tracks compare</summary><div id="spectral"></div></details>${Object.keys(forms).map((r) => renderTimes(r)).join("")}<details><summary>Explore instruments · optional</summary><p class="muted">One short paired region, four estimated stems. Completed results are reused. This check is not needed for the document.</p>${analysis.stem_evidence?.length ? `<p>Instrument check completed.</p><pre>${esc(analysis.stem_evidence.map((x) => `${x.source_stem} → ${x.new_song_stem}: ${x.interpretation}`).join("\n"))}</pre>` : button("Explore instruments", "stems")}</details>${nav("Next: Describe the sound →")}`,
     );
     loadAudio().catch((e) => notice(e.message));
     $("#spectral").parentElement.addEventListener("toggle", (e) => {
@@ -398,8 +399,20 @@ function validTimes(f) {
   );
 }
 function gate() {
-  if (step === 2 && Object.values(forms).some((f) => f.status === "pending"))
-    throw Error("Confirm each type of use, or choose that it did not happen.");
+  if (step === 2) {
+    const pending = Object.keys(forms).filter((r) => forms[r].status === "pending");
+    if (pending.length)
+      throw Error(
+        pending.map((r) => r === "publishing"
+          ? "Replayed music: choose Yes only if you separately replayed or re-sang a part; otherwise choose No separate replay or re-sung part."
+          : "Recording sample: confirm whether you used audio from the original recording.").join(" "),
+      );
+    if (!active().length)
+      throw Error("No sample use is selected. Confirm at least one use to create a Nature of Use document, or start a new sample.");
+    const unchecked = active().filter((r) => !validTimes(forms[r]));
+    if (unchecked.length)
+      throw Error(unchecked.map((r) => `${name(r)}: accept the suggested times, or edit and confirm valid times before continuing.`).join(" "));
+  }
   if (
     step === 3 &&
     active().some((r) =>
@@ -526,6 +539,7 @@ $("#view").addEventListener("change", (e) => {
     }
   }
   if (r && el.dataset.field === "status") {
+    forms[r].status = el.value;
     forms[r].details_confirmed = el.value === "no_use";
     render();
   }

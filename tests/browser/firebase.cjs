@@ -193,7 +193,20 @@ function python(mode, body) {
       .waitFor();
     const master = p.locator('[data-rights="master"]').first(),
       publishing = p.locator('[data-rights="publishing"]').first();
-    await publishing.locator('[data-field="status"]').selectOption("no_use");
+    await master.locator("[data-times]").selectOption("accept");
+    await p.getByRole("button", { name: "Next: Describe the sound →", exact: true }).click();
+    await p.getByText(/Replayed music: choose Yes only/).waitFor();
+    const alertBox = await p.locator("#notice").boundingBox();
+    if (!alertBox || alertBox.y < 0 || alertBox.y >= 1000)
+      throw Error("Blocking guidance is off screen");
+    // A change-only select event must persist its value, independent of input events.
+    await publishing.locator('[data-field="status"]').evaluate((el) => {
+      el.value = "no_use";
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await master.locator("[data-times]").selectOption("pending");
+    await p.getByRole("button", { name: "Next: Describe the sound →", exact: true }).click();
+    await p.getByText(/accept the suggested times, or edit and confirm/).waitFor();
     await master.locator("[data-times]").selectOption("accept");
     await p
       .getByRole("button", { name: "Next: Describe the sound →", exact: true })
@@ -233,6 +246,11 @@ function python(mode, body) {
     const downloadReady = p.waitForEvent("download");
     await p.getByRole("button", { name: "Download HTML", exact: true }).click();
     const download = await downloadReady;
+    if (process.env.LASTRADA_BROWSER_OUTPUT) {
+      fs.mkdirSync(process.env.LASTRADA_BROWSER_OUTPUT, { recursive: true });
+      await download.saveAs(path.join(process.env.LASTRADA_BROWSER_OUTPUT, "test-reviewed-nature-of-use.html"));
+      await p.screenshot({ path: path.join(process.env.LASTRADA_BROWSER_OUTPUT, "download-stage.png"), fullPage: true });
+    }
     if (download.suggestedFilename() !== "nature-of-use.html")
       throw Error("Download name");
     if (

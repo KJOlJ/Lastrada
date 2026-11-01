@@ -1,6 +1,8 @@
 """Generated case for the browser contract test; no client recordings or models."""
 
 import json
+import os
+from pathlib import Path
 import sys
 from lastrada.schemas.models import Analysis, Intake, Work, Interval
 from lastrada.reporting.suggestions import suggested_intervals, placement_proposal
@@ -19,12 +21,15 @@ def initial():
     analysis.master.locate.measurement_intervals = [
         Interval(new_start=1, new_end=4, source="pfnmf")
     ]
+    if os.getenv("LASTRADA_BROWSER_ANALYSIS"):
+        analysis = Analysis.model_validate_json(Path(os.environ["LASTRADA_BROWSER_ANALYSIS"]).read_text())
+        intake = analysis.input
     return {
         "analysis": analysis.model_dump(mode="json"),
         "suggestions": {
             r: {
                 "intervals": [i.model_dump(mode="json") for i in suggested_intervals(analysis, r)],
-                "placement": placement_proposal(suggested_intervals(analysis, r), 20).__dict__,
+                "placement": placement_proposal(suggested_intervals(analysis, r), analysis.durations["new"]).__dict__,
             }
             for r in intake.analysis_scope
         },
