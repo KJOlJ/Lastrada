@@ -35,7 +35,10 @@ let config,
   localFiles = {},
   audioUrls = {},
   comparison,
-  plotPromise;
+  plotPromise,
+  instrumentBusy = false,
+  instrumentMessage = "",
+  instrumentError = "";
 const titles = [
   "Your tracks",
   "Finding your sample",
@@ -124,6 +127,9 @@ function reset() {
   analysis = null;
   forms = {};
   comparison = null;
+  instrumentBusy = false;
+  instrumentMessage = "";
+  instrumentError = "";
   narrative = "";
   generated = "";
   notes = "";
@@ -156,7 +162,13 @@ function render() {
   if (!analysis) return;
   if (step === 2) {
     frame(
-      `<h1>Listen & check.</h1><p class="muted">Accept the moments you hear, or unlock the table to correct them. Original-track times may be unavailable for fallback estimates.</p><p class="muted">Used the original audio without recording a separate replay? Confirm the recording sample, accept its times, and choose “No separate replay or re-sung part” below. You do not need timestamps for a use that did not happen.</p><div class="grid"><div><h3>The original</h3><audio controls id="originalPlayer"></audio></div><div><h3>Your track</h3><audio controls id="newPlayer"></audio></div></div>${(analysis.warnings || []).map((w) => `<p class="warning">${esc(w)}</p>`).join("")}<details><summary>See how the tracks compare</summary><div id="spectral"></div></details>${Object.keys(forms).map((r) => renderTimes(r)).join("")}<details><summary>Explore instruments · optional</summary><p class="muted">One short paired region, four estimated stems. Completed results are reused. This check is not needed for the document.</p>${analysis.stem_evidence?.length ? `<p>Instrument check completed.</p><pre>${esc(analysis.stem_evidence.map((x) => `${x.source_stem} → ${x.new_song_stem}: ${x.interpretation}`).join("\n"))}</pre>` : button("Explore instruments", "stems")}</details>${nav("Next: Describe the sound →")}`,
+      `<h1>Listen & check.</h1><p class="muted">Accept the moments you hear, or unlock the table to correct them. Original-track times may be unavailable for fallback estimates.</p><p class="muted">Used the original audio without recording a separate replay? Confirm the recording sample, accept its times, and choose “No separate replay or re-sung part” below. You do not need timestamps for a use that did not happen.</p><div class="grid"><div><h3>The original</h3><audio controls id="originalPlayer"></audio></div><div><h3>Your track</h3><audio controls id="newPlayer"></audio></div></div>${(analysis.warnings || []).map((w) => `<p class="warning">${esc(w)}</p>`).join("")}<details><summary>See how the tracks compare</summary><div id="spectral"></div></details>${Object.keys(
+        forms,
+      )
+        .map((r) => renderTimes(r))
+        .join(
+          "",
+        )}<section id="instruments" aria-label="Instrument check">${renderInstruments()}</section>${nav("Next: Describe the sound →")}`,
     );
     loadAudio().catch((e) => notice(e.message));
     $("#spectral").parentElement.addEventListener("toggle", (e) => {
@@ -204,6 +216,55 @@ function render() {
   frame(
     `<h1>Your Nature of Use.</h1><p class="muted">A clear account of what you took and how you used it.</p><article class="document">${esc(narrative)}</article><div class="actions">${button("Download HTML", "html", true)}${button("Download text", "text")}</div><details><summary>Supporting analysis</summary>${button("Download analysis JSON", "json")}</details>${nav("Finish")}`,
   );
+}
+function renderInstruments() {
+  const evidence = analysis?.stem_evidence || [];
+  const eligible = analysis?.master?.locate?.sample_occurrences?.some(
+    (i) => Number.isFinite(i.original_start) && Number.isFinite(i.original_end),
+  );
+  const method = analysis?.methods?.stems || "";
+  const failure =
+    instrumentError ||
+    (method.startsWith("unavailable:")
+      ? "The instrument check could not finish. You can continue using your timestamps or try again."
+      : "");
+  const header =
+    '<h2>Check the instruments</h2><p class="muted">Optional · Compare bass, drums, vocals and other sounds in one short matched region. This does not check every timestamp.</p>';
+  if (instrumentBusy)
+    return `${header}<p role="status"><span class="spinner"></span> ${esc(instrumentMessage || "Starting the instrument check…")}</p><button disabled>Instrument check in progress</button>`;
+  if (evidence.length) {
+    const labels = {
+      full_mix: "Full recording (reference)",
+      bass: "Bass",
+      drums: "Drums",
+      vocals: "Vocals",
+      other: "Other sounds",
+    };
+    return `${header}<p role="status">Instrument check complete. These are estimated stems; listen before confirming a sampled instrument.</p><div class="tableWrap"><table aria-label="Instrument comparison results"><thead><tr><th>Original</th><th>Your track</th><th>Result in this region</th></tr></thead><tbody>${evidence.map((x) => `<tr><td>${esc(labels[x.source_stem] || x.source_stem)}</td><td>${esc(labels[x.new_song_stem] || x.new_song_stem)}</td><td>${x.dtw_result === "accepted" ? "Possible supporting match" : x.dtw_result === "weak" ? "Uncertain alignment" : "No supporting match"}</td></tr>`).join("")}</tbody></table></div><p class="muted">Completed results are reused.</p>`;
+  }
+  return `${header}${failure ? `<p role="alert" class="warning">${esc(failure)}</p>` : ""}${method.startsWith("unavailable:") ? `<details><summary>Instrument check details</summary><pre>${esc(method)}</pre></details>` : ""}${instrumentMessage && !failure ? `<p role="status">${esc(instrumentMessage)}</p>` : ""}${eligible ? button(failure ? "Try instrument check again" : "Run instrument check", "stems") : '<p class="muted">This check needs a matched region with timestamps in both recordings. The current analysis has no paired region. You can still continue to your document.</p><button disabled>Instrument check unavailable</button>'}`;
+}
+function updateInstruments() {
+  if ($("#instruments")) $("#instruments").innerHTML = renderInstruments();
+}
+async function startInstrumentCheck() {
+  if (instrumentBusy) return;
+  const target = caseId;
+  const serial = ++polling;
+  instrumentBusy = true;
+  instrumentError = "";
+  instrumentMessage = "Starting the instrument check…";
+  updateInstruments();
+  try {
+    await json(`/api/analyses/${target}/stems`, { method: "POST" });
+    if (serial !== polling || target !== caseId) return;
+    await poll({ instruments: true });
+  } catch (error) {
+    if (serial !== polling || target !== caseId) return;
+    instrumentBusy = false;
+    instrumentError = error.message;
+    updateInstruments();
+  }
 }
 function active() {
   return Object.keys(forms).filter((r) => forms[r].status !== "no_use");
@@ -298,40 +359,80 @@ async function analyze() {
     throw e;
   }
 }
-async function poll() {
+async function poll({ instruments = false } = {}) {
   const serial = ++polling;
   let errors = 0;
   while (serial === polling && user) {
     try {
       const state = await json(`/api/analyses/${caseId}`);
       if (serial !== polling) return;
-      errors = 0;
       if (state.status === "completed") {
-        await loadResult();
-        step = 2;
-        render();
+        if (
+          !(await loadResult({
+            preserveReview: instruments,
+            expectedPoll: serial,
+          }))
+        )
+          return;
+        if (serial !== polling) return;
+        if (instruments || state.operation === "stems") {
+          instrumentBusy = false;
+          instrumentError = state.error || "";
+          instrumentMessage = analysis.stem_evidence?.length
+            ? ""
+            : "No instrument comparison results were returned. You can continue to your document.";
+          if (instruments) updateInstruments();
+          else {
+            step = 2;
+            render();
+          }
+        } else {
+          step = 2;
+          render();
+        }
         return;
       }
       if (state.status === "failed")
         throw Object.assign(Error(state.error || "Analysis did not finish."), {
           terminal: true,
         });
+      if (instruments) {
+        instrumentMessage =
+          state.status === "running"
+            ? "Comparing the instruments. The first check may take a few minutes while the model starts."
+            : "Instrument check queued. Waiting for the analysis worker.";
+        updateInstruments();
+      }
       if ($("#jobStatus"))
         $("#jobStatus").textContent =
-          state.status === "running"
-            ? "Your tracks are being analyzed. Model startup can take a few minutes."
-            : "Your sample is queued. Only one heavy analysis runs at a time.";
+          state.operation === "stems"
+            ? "Your instrument check is in progress. Model startup can take a few minutes."
+            : state.status === "running"
+              ? "Your tracks are being analyzed. Model startup can take a few minutes."
+              : "Your sample is queued. Only one heavy analysis runs at a time.";
+      errors = 0;
     } catch (e) {
       if (e.terminal || ++errors >= 5) {
-        notice(e.message);
+        if (instruments) {
+          instrumentBusy = false;
+          instrumentError = e.terminal
+            ? e.message
+            : "We lost contact with the instrument check. Reload this page to reconnect; the job may still be running.";
+          updateInstruments();
+        } else notice(e.message);
         return;
       }
     }
     await new Promise((r) => setTimeout(r, document.hidden ? 15000 : 4000));
   }
 }
-async function loadResult() {
-  const data = await json(`/api/analyses/${caseId}/result`);
+async function loadResult({
+  preserveReview = false,
+  expectedPoll = polling,
+} = {}) {
+  const target = caseId;
+  const data = await json(`/api/analyses/${target}/result`);
+  if (expectedPoll !== polling || target !== caseId) return false;
   analysis = data.analysis;
   const corrected = analysis.review.corrected;
   if (!Object.keys(forms).length) {
@@ -371,12 +472,13 @@ async function loadResult() {
       };
     }
   }
-  if (corrected) {
+  if (corrected && !preserveReview) {
     narrative = corrected.nature_of_use.text;
     reviewer = analysis.review.reviewer || user.displayName || "";
     notes = analysis.review.notes || "";
     approved = analysis.review.status === "approved";
   }
+  return true;
 }
 function validTimes(f) {
   return (
@@ -400,18 +502,33 @@ function validTimes(f) {
 }
 function gate() {
   if (step === 2) {
-    const pending = Object.keys(forms).filter((r) => forms[r].status === "pending");
+    const pending = Object.keys(forms).filter(
+      (r) => forms[r].status === "pending",
+    );
     if (pending.length)
       throw Error(
-        pending.map((r) => r === "publishing"
-          ? "Replayed music: choose Yes only if you separately replayed or re-sang a part; otherwise choose No separate replay or re-sung part."
-          : "Recording sample: confirm whether you used audio from the original recording.").join(" "),
+        pending
+          .map((r) =>
+            r === "publishing"
+              ? "Replayed music: choose Yes only if you separately replayed or re-sang a part; otherwise choose No separate replay or re-sung part."
+              : "Recording sample: confirm whether you used audio from the original recording.",
+          )
+          .join(" "),
       );
     if (!active().length)
-      throw Error("No sample use is selected. Confirm at least one use to create a Nature of Use document, or start a new sample.");
+      throw Error(
+        "No sample use is selected. Confirm at least one use to create a Nature of Use document, or start a new sample.",
+      );
     const unchecked = active().filter((r) => !validTimes(forms[r]));
     if (unchecked.length)
-      throw Error(unchecked.map((r) => `${name(r)}: accept the suggested times, or edit and confirm valid times before continuing.`).join(" "));
+      throw Error(
+        unchecked
+          .map(
+            (r) =>
+              `${name(r)}: accept the suggested times, or edit and confirm valid times before continuing.`,
+          )
+          .join(" "),
+      );
   }
   if (
     step === 3 &&
@@ -624,10 +741,7 @@ $("#view").addEventListener("click", async (e) => {
           : "Draft saved.",
       );
     } else if (action === "stems") {
-      await json(`/api/analyses/${caseId}/stems`, { method: "POST" });
-      step = 1;
-      render();
-      await poll();
+      await startInstrumentCheck();
     } else if (["html", "text", "json"].includes(action))
       await download(action);
   } catch (error) {

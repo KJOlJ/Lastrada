@@ -19,4 +19,5 @@ jobs:
       - run: node --check web/public/app.js
       - run: npm ci --prefix web && cd web && npx playwright install --with-deps chromium
       - run: npm test --prefix web
+      - run: npm run test:instruments --prefix web
       - run: python deploy/bootstrap.py

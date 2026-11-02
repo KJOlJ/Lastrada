@@ -62,3 +62,30 @@ The checked-in Hosting configuration explicitly selects `lastrada-64bab`. If
 `config.json` is missing, this command stops before deployment; recover the
 existing generated configuration rather than publishing an unconfigured UI.
 This replaces that site's current frontend and does not deploy Cloud Run.
+
+## Optional instrument check
+
+The listening screen has one visible **Run instrument check** button. It shows
+starting, queued and running feedback immediately within the same screen, keeps
+review entries, and disables duplicate clicks. Completed comparisons appear in
+a table. A cached result is displayed without another request. If there are no
+paired original/new-track timestamps, the unavailable button explains why.
+
+Worker failures (even when the main analysis remains completed), model-download
+failures, quota refusals and empty results are shown beside the control. An
+optional failure does not block the main document workflow. Reload reconnects
+to an existing queued job. Starting a new sample ignores late responses from
+an earlier request. Stem estimates remain possible supporting evidence.
+
+Run these generated-data browser scenarios with:
+
+```bash
+PYTHON=.venv/bin/python npm run test:instruments --prefix web
+```
+
+The suite covers successful/cached results, worker and model failures, quota
+refusal, completed comparisons with no match, empty results, missing source
+times, and reset during a request. Except for the reset scenario, each continues
+through review and actual Python document rendering to HTML download. Cloud
+transport and identity are mocked, so hosted worker execution still requires
+verification in the deployed app.
