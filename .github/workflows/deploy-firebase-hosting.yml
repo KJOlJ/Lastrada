@@ -83,7 +83,7 @@ jobs:
         with:
           project_id: lastrada-64bab
 
-      - name: Authorize the new Hosting origin for the API and upload bucket
+      - name: Authorize the new Hosting origin and set practical testing limits
         if: steps.auth.outputs.mode == 'service-account'
         run: |
           set -euo pipefail
@@ -94,7 +94,7 @@ jobs:
           gcloud run services update lastrada-api \
             --project lastrada-64bab \
             --region us-central1 \
-            --update-env-vars="^@^LASTRADA_ORIGINS=${ORIGINS}" \
+            --update-env-vars="^@^LASTRADA_ORIGINS=${ORIGINS}@LASTRADA_USER_DAILY_JOBS=25@LASTRADA_DAILY_JOBS=200" \
             --quiet
 
           cat > /tmp/cors.json <<'JSON'
@@ -167,5 +167,6 @@ jobs:
             echo "https://lastrada-alt.web.app"
             echo ""
             echo "The new Hosting origin is authorized for the Cloud Run API and signed uploads."
+            echo "Testing limits are 25 operations per user and 200 shared operations per UTC day."
             echo "Sony, DTW, Demucs and stored analysis behavior were not changed."
           } >> "${GITHUB_STEP_SUMMARY}"
