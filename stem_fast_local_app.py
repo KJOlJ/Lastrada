@@ -23,6 +23,7 @@ def _bounded_candidate_count() -> int:
 
 
 # Force the local interactive profile before app.py loads its settings.
+os.environ["LASTRADA_LOCAL_STEM_FAST"] = "1"
 os.environ["LASTRADA_STEM_ENABLED"] = "1"
 os.environ["LASTRADA_STEM_MODEL"] = os.getenv(
     "LASTRADA_STEM_FAST_MODEL", "htdemucs_6s"

@@ -34,15 +34,16 @@ class Settings(StrictModel):
     dtw_max_duration_ratio: float = Field(default=10.0, ge=1.0, le=10.0)
     dtw_minimum_duration_seconds: float = Field(default=0.5, gt=0, le=10.0)
 
-    # Optional second-stage validation across every Sony candidate returned by
-    # the current adapter (which is capped at 50 candidates). This can be very
-    # compute-intensive on CPU; candidate-region outputs are cached by Demucs.
+    # Opt-in candidate validation. Main UI uses one bounded probe after analysis;
+    # explicit laboratory configurations may still request more candidates.
     stem_enabled: bool = False
-    stem_model_name: Literal["htdemucs_6s", "htdemucs"] = "htdemucs_6s"
+    stem_model_name: Literal["htdemucs_6s", "htdemucs"] = "htdemucs"
     stem_device: Literal["cpu", "cuda"] = "cpu"
-    stem_max_candidates: int = Field(default=50, ge=1, le=50)
-    stem_separation_padding_seconds: float = Field(default=4.0, ge=1.0, le=12.0)
-    stem_include_cross_other: bool = True
+    stem_max_candidates: int = Field(default=1, ge=1, le=50)
+    stem_separation_padding_seconds: float = Field(default=1.0, ge=1.0, le=12.0)
+    stem_include_cross_other: bool = False
+    stem_probe_seconds: float = Field(default=8.0, ge=1.0, le=12.0)
+    stem_timeout_seconds: int = Field(default=180, ge=30, le=600)
 
 
 def _optional_bool(name: str) -> bool | None:

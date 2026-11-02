@@ -49,6 +49,7 @@ streamlit==1.65.0
 threadpoolctl==3.7.0
 toml==0.10.2
 torch==2.14.1+cpu
+demucs==4.1.0
 tqdm==4.70.1
 typing-extensions==4.16.0
 typing-inspection==0.4.4
@@ -61,4 +62,4 @@ websockets==17.2
 # Editable source install is required because the Sony checkpoint imports
 # src.networks.* modules that are omitted from the upstream wheel package.
 -e git+https://github.com/sony/sampleid.git@e212b0b9974d52d334cc793ef1b8cabaf251e5f8#egg=sampleid
--e .
+-e .[stems]

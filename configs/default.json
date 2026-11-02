@@ -17,9 +17,10 @@
   "dtw_max_duration_ratio": 10.0,
   "dtw_minimum_duration_seconds": 0.5,
   "stem_enabled": false,
-  "stem_model_name": "htdemucs_6s",
+  "stem_model_name": "htdemucs",
   "stem_device": "cpu",
-  "stem_max_candidates": 50,
-  "stem_separation_padding_seconds": 4.0,
-  "stem_include_cross_other": true
+  "stem_max_candidates": 1,
+  "stem_separation_padding_seconds": 1.0,
+  "stem_include_cross_other": false,
+  "stem_probe_seconds": 8.0
 }

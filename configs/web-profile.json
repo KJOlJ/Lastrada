@@ -1,0 +1,6 @@
+{
+  "name": "stem-fast",
+  "source_branch": "local/stem-fast",
+  "stem_model": "htdemucs_6s",
+  "initial_stem_candidates": 3
+}

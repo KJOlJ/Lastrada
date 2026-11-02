@@ -17,8 +17,9 @@ For one Sony or manually supplied candidate interval:
 6. rank accepted stem-pair alignments by label agreement and DTW cost;
 7. let the reviewer listen to the strongest estimated source and derivative stems.
 
-The default six-source model produces estimated `vocals`, `drums`, `bass`,
-`guitar`, `piano`, and `other` stems. These are not recovered studio multitracks.
+The main app uses the four-source `htdemucs` model for estimated `vocals`,
+`drums`, `bass`, and `other` stems. The laboratory can still explicitly select
+`htdemucs_6s` for guitar and piano. These are not recovered studio multitracks.
 Bleed, artifacts and incorrect stem assignment are expected.
 
 ## Windows setup
@@ -81,3 +82,42 @@ under the configured DTW rules. It does not establish that:
 
 Use full-mix Sony evidence, timing consistency, stem agreement and human listening
 together. Keep all automated outputs at `candidate` status until expert review.
+
+## Streamlit stem installation
+
+On `feat/stem-assisted-main-flow`, production `requirements.txt` installs
+`-e .[stems]` and pins `demucs==4.1.0`. This makes Demucs available to the main
+application without running the Windows helper script. Version 4.1.0 imports
+with the pinned CPU Torch runtime without requiring a matching torchaudio wheel.
+
+After the branch updates, confirm Community Cloud rebuilds its dependencies;
+reboot the existing app if needed and inspect the build logs for Demucs 4.1.0.
+Demucs downloads its own weights on first separation, independently of the Sony
+checkpoint URL. The host must reach the model provider and have enough memory
+and CPU for separation.
+
+Local verification: Demucs import, CLI help and model listing passed; installed
+package compatibility and pip's production-requirements resolution passed; all
+87 repository tests passed. A generated-audio separation smoke test reached the
+model download but was blocked by this workspace's network proxy (403 on both
+the Hugging Face route and legacy provider fallback). Successful pretrained
+separation and the Streamlit rebuild have not been verified.
+
+## Lightweight main-app behavior
+
+Demucs is no longer part of the initial analysis, including when an environment
+setting enables stems for laboratory use. The main app forces that stage off
+and offers an explicit **Explore instruments** button after timestamps appear.
+The requested probe examines one highest-similarity paired candidate, clips
+both songs' candidate spans to eight seconds, adds one-second context margins,
+and uses the four-stem model. Four-second processing segments, one-thread CPU
+workers, a 180-second subprocess timeout and one in-process concurrent heavy request (including main analysis)
+bound the work. Successful results are reused; full candidate timing and saved
+review payloads are not replaced by a shortened probe.
+
+The configured comparison budget changed from 50 paired regions to one;
+ordinary runs now make zero stem requests. These are verified call-count and
+crop-size limits, not measured hosted CPU or memory savings. Pretrained Demucs
+inference remains unverified in this workspace because model downloads are
+blocked by its network proxy. Streamlit resource use must be checked after its
+rebuild. Laboratory callers may still explicitly configure multiple candidates.

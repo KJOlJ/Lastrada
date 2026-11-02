@@ -1,0 +1,23 @@
+name: Firebase web validation
+on:
+  push:
+    paths: ['run-local.py', 'Start-Lastrada.cmd', 'Start-Lastrada.command', 'web/**', 'configs/**', 'deploy/**', 'src/lastrada/**', 'tests/**', 'pyproject.toml', 'firebase.json', '.github/workflows/firebase-web.yml']
+  pull_request:
+    paths: ['run-local.py', 'Start-Lastrada.cmd', 'Start-Lastrada.command', 'web/**', 'configs/**', 'deploy/**', 'src/lastrada/**', 'tests/**', 'pyproject.toml', 'firebase.json', '.github/workflows/firebase-web.yml']
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: python -m pip install -r requirements.lock -r deploy/requirements-api.txt && python -m pip install --no-deps -e .
+      - run: ruff check . && pytest -q
+      - run: python -m py_compile run-local.py && python run-local.py --help && bash -n Start-Lastrada.command
+      - run: node --check web/public/app.js
+      - run: npm ci --prefix web && cd web && npx playwright install --with-deps chromium
+      - run: npm test --prefix web
+      - run: npm run test:instruments --prefix web
+      - run: python deploy/bootstrap.py

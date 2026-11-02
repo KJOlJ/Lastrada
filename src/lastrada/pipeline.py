@@ -21,10 +21,7 @@ def _best_separated_stem_evidence(comparison):
             item
             for item in comparison.evidence
             if item.accepted
-            and not (
-                item.source_stem == "full_mix"
-                and item.derivative_stem == "full_mix"
-            )
+            and not (item.source_stem == "full_mix" and item.derivative_stem == "full_mix")
         ),
         None,
     )
@@ -79,11 +76,7 @@ def _should_run_recording_evidence(intake, adapter, settings):
     The legal master path remains not_requested unless master is in the intake scope;
     this helper only controls whether recording evidence is computed for reviewer use.
     """
-    return (
-        "master" in intake.analysis_scope
-        or adapter is not None
-        or settings.stem_enabled
-    )
+    return "master" in intake.analysis_scope or adapter is not None or settings.stem_enabled
 
 
 def stem_assist_candidates(original, new, candidates, separator, settings):
@@ -136,10 +129,7 @@ def stem_assist_candidates(original, new, candidates, separator, settings):
             new_end=best.refined_new_end,
             original_start=candidate.original_start,
             original_end=candidate.original_end,
-            source=(
-                "stem-assisted DTW · "
-                f"{best.source_stem} → {best.derivative_stem}"
-            ),
+            source=(f"stem-assisted DTW · {best.source_stem} → {best.derivative_stem}"),
             status="candidate",
             similarity=candidate.similarity,
         )
@@ -183,6 +173,8 @@ def _run_optional_stem_assistance(result, original, new, candidates, settings):
             model_name=settings.stem_model_name,
             device=settings.stem_device,
             cache_dir=cache_root,
+            segment_seconds=4,
+            timeout_seconds=settings.stem_timeout_seconds,
         )
         started = perf_counter()
         updated, comparisons = stem_assist_candidates(
@@ -193,6 +185,9 @@ def _run_optional_stem_assistance(result, original, new, candidates, settings):
             settings,
         )
         result.stem_evidence = _stem_evidence_records(comparisons)
+        from lastrada.separation.occurrences import record_initial_comparisons
+
+        record_initial_comparisons(result, candidates, updated, comparisons, settings)
         result.timings_seconds["stem_separation"] = perf_counter() - started
     except (StemSeparationUnavailable, OSError, RuntimeError, ValueError) as exc:
         result.methods["stems"] = f"unavailable: {exc}"
@@ -385,3 +380,48 @@ def reuse_preview(preview, intake):
         if work.audio_version_warning:
             result.warnings.append(work.audio_version_warning)
     return result
+
+
+def short_stem_candidate(candidates, seconds=8.0):
+    """Take one centered, bounded paired probe; never claim it covers the full match."""
+    eligible = [
+        i for i in candidates if i.original_start is not None and i.original_end is not None
+    ]
+    if not eligible:
+        return None
+    candidate = max(eligible, key=lambda i: i.similarity if i.similarity is not None else -2)
+    updates = {}
+    for start, end in [("new_start", "new_end"), ("original_start", "original_end")]:
+        left, right = getattr(candidate, start), getattr(candidate, end)
+        duration = min(seconds, right - left)
+        updates[start] = (left + right - duration) / 2
+        updates[end] = updates[start] + duration
+    return candidate.model_copy(update=updates)
+
+
+def run_stem_probe(result, original, new, settings):
+    """Explicit, lightweight supporting evidence; leave complete timing/review untouched."""
+    probe = short_stem_candidate(
+        result.master.locate.sample_occurrences, settings.stem_probe_seconds
+    )
+    updated = result.model_copy(deep=True)
+    if probe is None:
+        updated.methods["stems"] = "not_run: source timestamps are needed for a paired stem check"
+        return updated
+    lightweight = settings.model_copy(
+        update={
+            "stem_enabled": True,
+            "stem_model_name": "htdemucs",
+            "stem_max_candidates": 1,
+            "stem_separation_padding_seconds": 1.0,
+            "stem_include_cross_other": False,
+            "dtw_max_pitch_shift_semitones": min(2, settings.dtw_max_pitch_shift_semitones),
+        }
+    )
+    _run_optional_stem_assistance(updated, original, new, [probe], lightweight)
+    updated.methods["stem_probe"] = (
+        f"one short supporting probe: new {probe.new_start:.2f}-{probe.new_end:.2f}s; "
+        f"original {probe.original_start:.2f}-{probe.original_end:.2f}s; "
+        "full candidate timestamps unchanged"
+    )
+    return updated

@@ -1,0 +1,21 @@
+# Python 3.12 Cloud Run runtime; no Streamlit frontend/server dependency.
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements-api.txt
+numpy==2.5.4
+scipy==1.18.1
+scikit-learn==1.9.1
+pandas==2.3.3
+soundfile==0.14.0
+pydantic==2.14.1
+plotly==6.9.0
+threadpoolctl==3.7.0
+openpyxl==3.1.5
+requests==2.34.2
+uvicorn==0.54.0
+torch==2.14.1+cpu
+hydra-core==1.3.7
+omegaconf==2.3.0
+tqdm==4.70.1
+demucs==4.1.0
+-e git+https://github.com/sony/sampleid.git@e212b0b9974d52d334cc793ef1b8cabaf251e5f8#egg=sampleid
+-e .[stems]

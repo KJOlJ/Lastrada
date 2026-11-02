@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#091426" />
+    <title>Lastrada · Nature of Use</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">LASTRADA</a>
+      <nav>
+        <button id="newSample" class="quiet">New Sample</button
+        ><button id="theme" class="quiet" aria-label="Switch colour theme">
+          Light mode</button
+        ><button id="account" class="quiet">Sign in</button>
+      </nav>
+    </header>
+    <main>
+      <div id="notice" role="alert" hidden></div>
+      <div id="progress"></div>
+      <section id="view" aria-live="polite"></section>
+    </main>
+    <footer>
+      Made for creators · Review before sharing · Files and results are kept for
+      about 7 days.
+      <details>
+        <summary>App version</summary>
+        <small id="buildVersion" hidden></small>
+      </details>
+    </footer>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

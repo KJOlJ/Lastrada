@@ -1,0 +1,9 @@
+{
+  "firebase": {
+    "apiKey": "PUBLIC_FIREBASE_WEB_API_KEY",
+    "authDomain": "lastrada-64bab.firebaseapp.com",
+    "projectId": "lastrada-64bab",
+    "appId": "PUBLIC_FIREBASE_APP_ID"
+  },
+  "apiBase": "https://YOUR_CLOUD_RUN_API_URL"
+}

@@ -37,3 +37,12 @@ attachments/
 # Streamlit-managed credentials must never enter source control.
 .streamlit/secrets.toml
 **/secrets.toml
+
+# Local Firebase/Cloud Run configuration and deployment outputs.
+.firebase/
+web/public/config.json
+deploy/generated/
+firebase-debug.log
+
+web/node_modules/
+web/test-results/

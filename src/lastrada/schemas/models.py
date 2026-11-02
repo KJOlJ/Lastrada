@@ -16,6 +16,10 @@ class Placement(StrEnum):
     INTRO_OUTRO = "intro_outro_without_chorus"
     VERSES = "verses"
     ONE_TIME = "one_time"
+    INTRO = "intro_only"
+    OUTRO = "outro_only"
+    BRIDGE = "bridge_only"
+    SELECTED = "selected_sections"
 
 
 PLACEMENT_CLASSES = [p.value for p in Placement]
@@ -88,6 +92,18 @@ class StemEvidence(StrictModel):
     reason: str = Field(min_length=1)
     mean_dtw_cost: float | None = Field(default=None, ge=0)
     pitch_shift_semitones: int | None = None
+
+
+class InstrumentOccurrence(StrictModel):
+    model_name: str | None = None
+    occurrence_id: str
+    candidate_number: int = Field(ge=1)
+    interval: Interval
+    probe: Interval | None = None
+    status: Literal["pending", "checked", "no_source", "too_short", "failed"] = "pending"
+    reason: str = "Not checked yet"
+    evidence: list[StemEvidence] = Field(default_factory=list)
+    suggested_instruments: list[str] = Field(default_factory=list)
 
 
 class Locate(StrictModel):
@@ -170,6 +186,7 @@ class Analysis(StrictModel):
     timings_seconds: dict[str, float] = Field(default_factory=dict)
     methods: dict[str, str] = Field(default_factory=dict)
     stem_evidence: list[StemEvidence] = Field(default_factory=list)
+    instrument_occurrences: list[InstrumentOccurrence] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     synthetic: bool = False
 

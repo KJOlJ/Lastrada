@@ -76,9 +76,7 @@ def _region_key(
 ) -> str:
     digest = hashlib.sha256()
     digest.update(crop.samples.tobytes())
-    digest.update(
-        f"{crop.sample_rate}:{start:.6f}:{end:.6f}:{model_name}:v1".encode()
-    )
+    digest.update(f"{crop.sample_rate}:{start:.6f}:{end:.6f}:{model_name}:v1".encode())
     return digest.hexdigest()
 
 
@@ -88,7 +86,7 @@ class DemucsSeparator:
     def __init__(
         self,
         *,
-        model_name: str = "htdemucs_6s",
+        model_name: str = "htdemucs",
         device: str = "cpu",
         cache_dir: str | Path = "cache/demucs",
         segment_seconds: int | float = 7,
@@ -188,8 +186,10 @@ class DemucsSeparator:
                 str(input_path),
             ]
             environment = os.environ.copy()
-            environment.setdefault("OMP_NUM_THREADS", "2")
-            environment.setdefault("MKL_NUM_THREADS", "2")
+            # Keep each CPU worker small even if the host sets larger BLAS pools.
+            environment["OMP_NUM_THREADS"] = "1"
+            environment["MKL_NUM_THREADS"] = "1"
+            environment["OPENBLAS_NUM_THREADS"] = "1"
 
             try:
                 result = subprocess.run(
@@ -242,9 +242,7 @@ class DemucsSeparator:
                 "crop_duration": crop.duration,
                 "stems": sorted(set(stem_names)),
             }
-            (staged / "manifest.json").write_text(
-                json.dumps(manifest, indent=2), encoding="utf-8"
-            )
+            (staged / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
             if cache_path.exists():
                 shutil.rmtree(cache_path)

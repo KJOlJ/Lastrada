@@ -2,7 +2,7 @@
 
 Validated in a Python 3.12 Linux cloud environment on CPU with FFmpeg available.
 
-- `pytest -q`: 79 tests passed, including numerical coverage, synthetic PF-NMF, compressed decoding, strict input/leakage boundaries, rights isolation, candidate grouping, review invariants, evaluation abstentions and a Streamlit interaction workflow with Next/Back navigation, saved edits and approval preservation.
+- `pytest -q`: 97 tests passed, including numerical coverage, synthetic PF-NMF, compressed decoding, strict input/leakage boundaries, rights isolation, candidate grouping, review invariants, evaluation abstentions and a Streamlit interaction workflow with Next/Back navigation, saved edits and approval preservation.
 - `ruff check .` and `git diff --check`: passed.
 - Synthetic end-to-end baseline: known coverage 66.67%, estimated spectral activation 67.07%, absolute error 0.40 percentage points. This single generated signal pair is not a real-music benchmark.
 - `scripts/check_sampleid.py`: authoritative checksum-verified Sony weights, CPU inference, embedding shape 1×2048 and self-match cosine approximately 0.99999988. This is integration evidence, not historical accuracy.
@@ -31,4 +31,14 @@ Performance regression checks count analysis, encoding, spectrum and figure call
 
 Both-use regression: confirming recording reuse and replayed music permits the description step even when automatic publishing times are unavailable. Unfinished timing checks are shown on Place the sample and block final review/document generation. Publishing times stay independent of master measurements; empty tables have no accept-times option.
 
-The both-use fix was rebased onto the existing Sony/DTW integration and all 79 tests passed. UI regression tests explicitly disable optional Sony inference to keep listening/form checks deterministic; the production matching default is preserved.
+The both-use fix was rebased onto the existing Sony/DTW integration and all 97 tests passed. UI regression tests explicitly disable optional Sony inference to keep listening/form checks deterministic; the production matching default is preserved.
+
+Lightweight-flow checks: 97 tests pass, including explicit-only stem calls,
+cache-hit review preservation, one-of-50 candidate budgeting, eight-second
+probe bounds, single-thread worker environment, disk separation reuse,
+section-map overlap classification, stale-default clearing and retaining human
+edits. No timestamp rule invents a verse/chorus/bridge label. In Chromium,
+recognized generated-WAV filenames skipped the credit screen and reached timing
+review in 1.6 seconds in one local run with Sony disabled. The no-replay answer
+hid that path; method/repetition prefills and the section-map UI rendered.
+This is not a real-music benchmark or Streamlit-hosted performance result.
