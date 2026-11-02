@@ -182,3 +182,57 @@ def test_cloud_task_targets_private_worker_with_oidc(monkeypatch):
     assert task["http_request"]["url"] == "https://worker.example/internal/process"
     assert task["http_request"]["oidc_token"]["audience"] == "https://worker.example"
     assert task["dispatch_deadline"].seconds == 1800
+
+
+def test_per_moment_check_upgrades_legacy_results_and_reuses_complete_rows(service):
+    from lastrada.schemas.models import Analysis, Intake, Work, Interval, StemEvidence
+    from lastrada.separation.occurrences import occurrence_rows
+
+    client, cases, queue = service
+    headers = {"Authorization": "Bearer alice", "Origin": "https://lastrada-64bab.web.app"}
+    analysis_id = client.post("/api/analyses", json=payload(), headers=headers).json()["id"]
+    root = prefix(owner_key("Bearer alice"), analysis_id)
+    state, _ = cases.read(root + "/case.json")
+    state["status"] = "completed"
+    cases.write(root + "/case.json", state)
+    intake = Intake(
+        case_id=analysis_id,
+        original_work=Work(title="Source", artist="Test"),
+        new_work=Work(title="Mix", artist="Test"),
+        analysis_scope=["master", "publishing"],
+    )
+    result = Analysis(case_id=analysis_id, input=intake, durations={"new": 20, "original": 20})
+    result.master.locate.sample_occurrences = [
+        Interval(new_start=1, new_end=5, original_start=2, original_end=6, source="sampleid")
+    ]
+    result.stem_evidence = [
+        StemEvidence(
+            candidate_number=1,
+            source_stem="bass",
+            new_song_stem="bass",
+            dtw_result="accepted",
+            interpretation="legacy",
+            reason="one short region",
+        )
+    ]
+    cases.write(root + "/result.json", result.model_dump(mode="json"))
+    response = client.get(f"/api/analyses/{analysis_id}/result", headers=headers).json()
+    assert response["instrument_rows"][0]["status"] == "pending"
+    assert response["suggestions"]["master"]["instruments"] == {}
+    assert client.post(f"/api/analyses/{analysis_id}/stems", headers=headers).status_code == 200
+    assert queue.enqueue.call_count == 1
+    # Repeat while in progress reuses the same job and quota.
+    client.post(f"/api/analyses/{analysis_id}/stems", headers=headers)
+    assert queue.enqueue.call_count == 1
+    result.instrument_occurrences = occurrence_rows(result)
+    result.instrument_occurrences[0].status = "checked"
+    result.instrument_occurrences[0].suggested_instruments = ["Bass"]
+    cases.write(root + "/result.json", result.model_dump(mode="json"))
+    state["status"] = "completed"
+    cases.write(root + "/case.json", state)
+    client.post(f"/api/analyses/{analysis_id}/stems", headers=headers)
+    assert queue.enqueue.call_count == 1
+    assert cases.requests == 2  # One upload reservation, one instrument job.
+    response = client.get(f"/api/analyses/{analysis_id}/result", headers=headers).json()
+    assert response["suggestions"]["master"]["instruments"]["element"] == "Bass"
+    assert response["suggestions"]["publishing"]["instruments"] == {}

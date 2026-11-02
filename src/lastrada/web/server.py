@@ -185,12 +185,12 @@ def create_app(cases=None, queue=None, authenticate_user=None, mode=None):
             if state["status"] != "completed":
                 raise ValueError("Finish the main analysis first")
             result = result_at(root)
-            if result.stem_evidence:
-                return state
-            from lastrada.pipeline import short_stem_candidate
+            from lastrada.separation.occurrences import instrument_check_complete, occurrence_rows
 
-            if short_stem_candidate(result.master.locate.sample_occurrences) is None:
-                raise ValueError("A paired original/new-track match is needed for instruments")
+            if instrument_check_complete(result):
+                return state
+            if not any(row.status in {"pending", "failed"} for row in occurrence_rows(result)):
+                raise ValueError("A paired region of at least two seconds is needed for instruments")
             repo().quota(user(request))
         else:
             if state["status"] != "uploading":
@@ -230,6 +230,7 @@ def create_app(cases=None, queue=None, authenticate_user=None, mode=None):
             "status": state["status"],
             "operation": state["operation"],
             "error": state.get("error"),
+            "instrument_progress": state.get("instrument_progress"),
         }
 
     @app.get("/api/analyses/{analysis_id}/result")
@@ -240,13 +241,16 @@ def create_app(cases=None, queue=None, authenticate_user=None, mode=None):
         value = result_at(root)
         from lastrada.reporting.suggestions import suggested_intervals, placement_proposal
         from lastrada.reporting.document import missing_document_inputs
+        from lastrada.separation.occurrences import occurrence_rows, instrument_prefill
 
         return {
             "analysis": value.model_dump(mode="json"),
             "missing": missing_document_inputs(value),
+            "instrument_rows": [row.model_dump(mode="json") for row in occurrence_rows(value)],
             "suggestions": {
                 r: {
                     "intervals": [i.model_dump(mode="json") for i in suggested_intervals(value, r)],
+                    "instruments": instrument_prefill(value) if r == "master" else {},
                     "placement": placement_proposal(
                         suggested_intervals(value, r), value.durations["new"]
                     ).__dict__,

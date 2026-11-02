@@ -46,7 +46,7 @@ def execute(owner, analysis_id, operation, task_id):
     from lastrada.web.cloud import Cases, prefix
     from lastrada.audio.io import decode
     from lastrada.config import Settings
-    from lastrada.pipeline import analyze_pair, run_stem_probe
+    from lastrada.pipeline import analyze_pair
     from lastrada.schemas.models import Intake, Work, Analysis
     from lastrada.reporting.comparison import spectral_view, comparison_figure
     from lastrada.recognition.sampleid_adapter import SampleIDAdapter
@@ -68,8 +68,21 @@ def execute(owner, analysis_id, operation, task_id):
         if operation == "stems":
             data, _ = repo.read(root + "/result.json")
             result = Analysis.model_validate(data)
-            if not result.stem_evidence:
-                result = run_stem_probe(result, original, new, settings)
+            from lastrada.separation.occurrences import (
+                run_occurrence_instruments,
+                instrument_progress,
+            )
+
+            def save_instruments(partial):
+                repo.write(root + "/result.json", partial.model_dump(mode="json"))
+                current, revision = repo.read(root + "/case.json")
+                if current.get("task_id") == task_id:
+                    current["instrument_progress"] = instrument_progress(partial)
+                    repo.write(root + "/case.json", current, revision)
+
+            result = run_occurrence_instruments(
+                result, original, new, settings, on_progress=save_instruments
+            )
         else:
             credits = state["credits"]
             intake = Intake(

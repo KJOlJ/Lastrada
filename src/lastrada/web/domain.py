@@ -104,8 +104,10 @@ def apply_review(analysis: Analysis, payload: ReviewPayload):
                     Feature(
                         feature="musical_element",
                         value=answer.element.strip(),
-                        source="expert_review",
-                        status="expert_verified",
+                        source="expert_review"
+                        if answer.details_confirmed
+                        else "unconfirmed_description",
+                        status="expert_verified" if answer.details_confirmed else "estimated",
                         review_required=not answer.details_confirmed,
                     )
                 ]
@@ -117,7 +119,10 @@ def apply_review(analysis: Analysis, payload: ReviewPayload):
                     Feature(
                         feature="lyrics",
                         value=answer.lyrics.strip(),
-                        source="expert_review",
+                        source="expert_review"
+                        if answer.details_confirmed
+                        else "unconfirmed_description",
+                        status="expert_verified" if answer.details_confirmed else "estimated",
                         review_required=not answer.details_confirmed,
                     )
                 )

@@ -45,6 +45,36 @@ function python(mode, body) {
     };
     data.analysis.master.locate.sample_occurrences = [interval];
     data.suggestions.master.intervals = [interval];
+    data.instrument_rows = [
+      {
+        occurrence_id: "test-row",
+        candidate_number: 1,
+        interval: { ...interval },
+        status: "pending",
+        reason: "Not checked",
+        evidence: [],
+        suggested_instruments: [],
+      },
+    ];
+    if (instrumentScenario === "success") {
+      const second = {
+        ...interval,
+        new_start: 6,
+        new_end: 9,
+        original_start: 10,
+        original_end: 13,
+      };
+      data.analysis.master.locate.sample_occurrences.push(second);
+      data.suggestions.master.intervals = [
+        ...data.analysis.master.locate.sample_occurrences,
+      ];
+      data.instrument_rows.push({
+        ...data.instrument_rows[0],
+        occurrence_id: "second-row",
+        candidate_number: 2,
+        interval: second,
+      });
+    }
   }
   const server = http.createServer((req, res) => {
     const file = path.join(
@@ -153,6 +183,21 @@ function python(mode, body) {
               "Today's analysis limit has been reached. Try again tomorrow.",
           };
         } else {
+          if (instrumentRequests > 1 && instrumentScenario === "success") {
+            const reviewedTimes =
+              data.analysis.review.corrected?.master?.locate.sample_occurrences;
+            if (reviewedTimes?.[0]?.new_start !== 2)
+              throw Error(
+                "Instrument request did not save the edited timestamps first",
+              );
+            data.instrument_rows = reviewedTimes.map((interval, index) => ({
+              ...data.instrument_rows[index],
+              interval,
+              status: index === 0 ? "pending" : "checked",
+              suggested_instruments: index === 0 ? [] : ["Drums"],
+            }));
+          }
+          instrumentPolls = 0;
           operation = "stems";
           job = "queued";
           result = { status: job, operation };
@@ -215,6 +260,29 @@ function python(mode, body) {
                   reason: "Generated browser fixture",
                 },
               ];
+            if (
+              !["worker_failure", "download_failure", "empty"].includes(
+                instrumentScenario,
+              )
+            ) {
+              data.instrument_rows[0].status = "checked";
+              data.instrument_rows[0].suggested_instruments =
+                instrumentScenario === "no_match" ? [] : ["Bass"];
+              data.instrument_rows[0].evidence = data.analysis.stem_evidence;
+              data.instrument_rows[0].probe = {
+                ...data.instrument_rows[0].interval,
+              };
+              if (instrumentScenario === "success") {
+                data.instrument_rows[1] = {
+                  ...data.instrument_rows[1],
+                  status: "checked",
+                  suggested_instruments: ["Drums"],
+                  evidence: [],
+                  probe: { ...data.instrument_rows[1].interval },
+                };
+              }
+              data.analysis.instrument_occurrences = data.instrument_rows;
+            }
           }
         }
         result = { id, status: job, operation, error: jobError };
@@ -285,7 +353,7 @@ function python(mode, body) {
         throw Error(
           "Missing source times should explain why instruments cannot run",
         );
-      await p.getByText(/current analysis has no paired region/).waitFor();
+      await p.getByText(/No eligible paired region/).waitFor();
     } else if (instrumentScenario) {
       await p
         .getByRole("button", { name: "Run instrument check", exact: true })
@@ -327,9 +395,7 @@ function python(mode, body) {
         else if (instrumentScenario === "download_failure")
           await p.getByText(/The instrument check could not finish/).waitFor();
         else if (instrumentScenario === "empty")
-          await p
-            .getByText(/No instrument comparison results were returned/)
-            .waitFor();
+          await p.getByText(/Some moments still need a check/).waitFor();
         else {
           await p
             .getByRole("table", { name: "Instrument comparison results" })
@@ -341,7 +407,20 @@ function python(mode, body) {
                 : "Possible supporting match",
               { exact: true },
             )
+            .first()
             .waitFor();
+          if (instrumentScenario === "success") {
+            const rows = p
+              .getByRole("table", { name: "Instrument comparison results" })
+              .locator("tbody tr");
+            if (
+              !(await rows.nth(0).innerText()).includes("Bass") ||
+              (await rows.nth(0).innerText()).includes("Drums")
+            )
+              throw Error("First moment inherited another instrument");
+            if (!(await rows.nth(1).innerText()).includes("Drums"))
+              throw Error("Second moment instrument missing");
+          }
           if (
             await p
               .getByRole("button", {
@@ -361,12 +440,103 @@ function python(mode, body) {
       )
         throw Error("Instrument check lost review inputs");
     }
+    if (instrumentScenario === "success") {
+      await master.locator("[data-times]").selectOption("edit");
+      await master.locator('[data-interval="0:new_start"]').fill("2");
+      if (
+        !(
+          await master.locator('[data-instrument-index="0"]').innerText()
+        ).includes("Not checked")
+      )
+        throw Error("Edited timestamp retained stale instrument label");
+      await master
+        .getByLabel("I’ve listened and confirmed these times", { exact: true })
+        .check();
+      await p
+        .getByRole("button", {
+          name: "Next: Describe the sound →",
+          exact: true,
+        })
+        .click();
+      if (
+        (await p
+          .getByLabel("What did you take?", { exact: true })
+          .inputValue()) !== "Drums"
+      )
+        throw Error("Edited timestamp retained stale sound prefill");
+      await p.getByRole("button", { name: "← Back", exact: true }).click();
+      await p
+        .getByRole("button", {
+          name: "Continue instrument checks",
+          exact: true,
+        })
+        .click();
+      await p
+        .getByText("Completed results are reused.", { exact: true })
+        .waitFor();
+      if (instrumentRequests !== 2)
+        throw Error("Edited moment was not rechecked");
+      if (
+        !(
+          await master.locator('[data-instrument-index="0"]').innerText()
+        ).includes("Bass")
+      )
+        throw Error(
+          "Rechecked moment did not restore its own instrument result",
+        );
+    }
+    if (process.env.LASTRADA_BROWSER_OUTPUT) {
+      fs.mkdirSync(process.env.LASTRADA_BROWSER_OUTPUT, { recursive: true });
+      await p.locator("#instruments").screenshot({
+        path: path.join(
+          process.env.LASTRADA_BROWSER_OUTPUT,
+          "instruments-by-moment.png",
+        ),
+      });
+    }
     await p
       .getByRole("button", { name: "Next: Describe the sound →", exact: true })
       .click();
+    if (instrumentScenario === "success") {
+      if (
+        (await p
+          .getByLabel("What did you take?", { exact: true })
+          .inputValue()) !== "Bass, Drums"
+      )
+        throw Error("Timestamp instruments did not prefill the sound");
+    }
     await p
       .getByLabel("What did you take?", { exact: true })
       .fill("A bassline");
+    await p.getByRole("button", { name: "← Back", exact: true }).click();
+    await p
+      .getByRole("button", { name: "Next: Describe the sound →", exact: true })
+      .click();
+    if (
+      (await p
+        .getByLabel("What did you take?", { exact: true })
+        .inputValue()) !== "A bassline"
+    )
+      throw Error("User sound edit was overwritten");
+    if (instrumentScenario === "success") {
+      await p.getByLabel("What did you take?", { exact: true }).fill("");
+      await p.getByRole("button", { name: "← Back", exact: true }).click();
+      await p
+        .getByRole("button", {
+          name: "Next: Describe the sound →",
+          exact: true,
+        })
+        .click();
+      if (
+        (await p
+          .getByLabel("What did you take?", { exact: true })
+          .inputValue()) !== ""
+      )
+        throw Error("Intentionally cleared description was replaced");
+      await p
+        .getByLabel("What did you take?", { exact: true })
+        .fill("A bassline");
+    }
     await p
       .getByLabel("What does it do in your track?", { exact: true })
       .fill("Main hook");

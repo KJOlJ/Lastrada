@@ -8,6 +8,7 @@ from lastrada.schemas.models import Analysis, Intake, Work, Interval
 from lastrada.reporting.suggestions import suggested_intervals, placement_proposal
 from lastrada.web.domain import ReviewPayload, apply_review
 from lastrada.reporting.document import document_html, document_text
+from lastrada.separation.occurrences import occurrence_rows, instrument_prefill
 
 
 def initial():
@@ -22,14 +23,20 @@ def initial():
         Interval(new_start=1, new_end=4, source="pfnmf")
     ]
     if os.getenv("LASTRADA_BROWSER_ANALYSIS"):
-        analysis = Analysis.model_validate_json(Path(os.environ["LASTRADA_BROWSER_ANALYSIS"]).read_text())
+        analysis = Analysis.model_validate_json(
+            Path(os.environ["LASTRADA_BROWSER_ANALYSIS"]).read_text()
+        )
         intake = analysis.input
     return {
         "analysis": analysis.model_dump(mode="json"),
+        "instrument_rows": [r.model_dump(mode="json") for r in occurrence_rows(analysis)],
         "suggestions": {
             r: {
+                "instruments": instrument_prefill(analysis) if r == "master" else {},
                 "intervals": [i.model_dump(mode="json") for i in suggested_intervals(analysis, r)],
-                "placement": placement_proposal(suggested_intervals(analysis, r), analysis.durations["new"]).__dict__,
+                "placement": placement_proposal(
+                    suggested_intervals(analysis, r), analysis.durations["new"]
+                ).__dict__,
             }
             for r in intake.analysis_scope
         },

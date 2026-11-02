@@ -1,8 +1,9 @@
 # Firebase web deployment
 
-**Deployment paused: the user requires a billing-disabled free plan.** The
-Cloud Run/Storage proposal below is not approved and must not be applied. See
-[the local $0 fallback](ZERO_COST_LOCAL.md) for current options.
+The user has since enabled Blaze billing and deployed the existing app. Updates
+use that existing project and the explicitly selected site. The resource limits
+below still apply. See [the local $0 fallback](ZERO_COST_LOCAL.md) for local use,
+and [workflow validation](WORKFLOW_VALIDATION.md) for per-moment instrument updates.
 
 This is a new Firebase Hosting UI and Python Cloud Run backend. It does not run
 Streamlit. The existing Streamlit app and deployment remain available while the
@@ -18,9 +19,11 @@ allows corrections, skips a use marked absent, and requires enough musical
 context before exporting a Nature of Use document. Timing suggests placement;
 it does not establish chorus/verse labels, instruments, or legal rights.
 
-Demucs runs only when requested, on one short paired candidate region. It uses
-four-stem `htdemucs`, four-second processing segments, one CPU thread, and reuses
-completed results. Ordinary browser inputs do not rerun Python analysis.
+Demucs runs only when requested, on a short paired probe for each eligible
+sample occurrence. It uses four-stem `htdemucs`, four-second processing segments
+and one CPU thread. Requests stop after ten minutes or fifty new comparisons;
+completed rows and exact separated crops are reused. Ordinary browser inputs do
+not rerun Python analysis. See the workflow guide for measured local performance.
 
 ## Resources requiring approval
 
@@ -117,7 +120,7 @@ Lifecycle cleanup is asynchronous, not an exact seven-day deletion deadline.
 
 ## Verification performed in Codex
 
-- 113 Python tests passed, including ownership isolation, Google-provider checks,
+- 120 Python tests passed, including ownership isolation, Google-provider checks,
   quotas, timestamp/review validation, export gating and mocked provisioning.
 - Browser test passed upload → timestamp confirmation → review → HTML download
   and reload/resume. Google identity and cloud transport were mocked; the real
@@ -127,9 +130,10 @@ Lifecycle cleanup is asynchronous, not an exact seven-day deletion deadline.
   returned 200, unauthenticated case access 401, and public worker route 404.
 - Ruff and JavaScript syntax checks passed. Deployment plan was inspected.
 
-These checks do not verify live Firebase sign-in, deployed IAM, model downloads,
-pretrained inference, hosted throughput, or cloud cost. No cloud resources were
-provisioned and no Hosting URL has been verified from this workspace.
+These checks do not verify live Firebase sign-in, deployed IAM, hosted throughput,
+or cloud cost. A separate local pretrained-model run on the private uploaded pair
+is documented in the workflow guide. No cloud resources were provisioned by this
+workspace; the user deployed the existing app from Cloud Shell.
 
 For local browser verification:
 

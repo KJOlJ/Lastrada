@@ -78,3 +78,17 @@ def test_web_private_keys_and_upload_limits():
     assert len(owner_key("user")) == 64
     with pytest.raises(ValueError):
         Upload(name="too-big.mp3", size=101 * 1024 * 1024)
+
+
+def test_unconfirmed_description_prefill_is_not_marked_expert_verified(example):
+    answer = complete()
+    answer.details_confirmed = False
+    payload = ReviewPayload(paths={"master": answer, "publishing": UseReview(status="no_use")})
+    reviewed = apply_review(example, payload)
+    features = reviewed.review.corrected["master"]["describe"]["elements"]
+    assert features[0]["status"] == "estimated"
+    assert features[0]["review_required"] is True
+    payload.approve = True
+    payload.reviewer = "Test"
+    with pytest.raises(ValueError):
+        apply_review(example, payload)

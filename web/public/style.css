@@ -338,3 +338,5 @@ footer {
     transition: none !important;
   }
 }
+
+.instrumentTable { max-height: 480px; }

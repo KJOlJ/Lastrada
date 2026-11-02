@@ -36,6 +36,10 @@ let config,
   audioUrls = {},
   comparison,
   plotPromise,
+  instrumentRows = [],
+  perMomentSupported = false,
+  touchedSoundFields = new Set(),
+  autoSoundFields = {},
   instrumentBusy = false,
   instrumentMessage = "",
   instrumentError = "";
@@ -127,6 +131,10 @@ function reset() {
   analysis = null;
   forms = {};
   comparison = null;
+  instrumentRows = [];
+  perMomentSupported = false;
+  touchedSoundFields = new Set();
+  autoSoundFields = {};
   instrumentBusy = false;
   instrumentMessage = "";
   instrumentError = "";
@@ -178,7 +186,7 @@ function render() {
   }
   if (step === 3) {
     frame(
-      `<h1>What did you use?</h1><p class="muted">Method and repetition are suggested from the analysis. Check them, then describe the sound and its role.</p>${active()
+      `<h1>What did you use?</h1><p class="muted">Sound, method, repetition and placement are suggested where the evidence supports them. Check the suggestions. Tell us the musical role and any reused lyrics; those cannot be established from stem labels alone.</p>${active()
         .map(
           (r) =>
             `<div class="track" data-rights="${r}"><h2>${name(r)}</h2>${field("What did you take?", "element", forms[r].element, "A bassline, vocal phrase or drum break")}${field("How did you use it?", "method", forms[r].method)}${field("Does it loop or repeat?", "repetition", forms[r].repetition)}${field("What does it do in your track?", "role", forms[r].role, "Main hook, rhythm bed, background texture…")}${field("Any reused lyrics? (optional)", "lyrics", forms[r].lyrics)}</div>`,
@@ -217,35 +225,147 @@ function render() {
     `<h1>Your Nature of Use.</h1><p class="muted">A clear account of what you took and how you used it.</p><article class="document">${esc(narrative)}</article><div class="actions">${button("Download HTML", "html", true)}${button("Download text", "text")}</div><details><summary>Supporting analysis</summary>${button("Download analysis JSON", "json")}</details>${nav("Finish")}`,
   );
 }
+function sameMoment(a, b) {
+  return ["new_start", "new_end", "original_start", "original_end"].every(
+    (k) => a[k] === b[k],
+  );
+}
+function instrumentRow(interval) {
+  return instrumentRows.find((row) => sameMoment(row.interval, interval));
+}
+function soundLabel(interval) {
+  const row = instrumentRow(interval);
+  if (!row) return "Not checked for these times";
+  if (row.status === "checked")
+    return row.suggested_instruments?.join(", ") || "No reliable match";
+  return (
+    {
+      pending: "Not checked yet",
+      no_source: "Original times needed",
+      too_short: "Too short to assess",
+      failed: "Check failed",
+    }[row.status] || "Not checked"
+  );
+}
+function currentInstrumentRows() {
+  return (forms.master?.intervals || []).map(
+    (interval) =>
+      instrumentRow(interval) || {
+        interval,
+        status:
+          interval.original_start == null || interval.original_end == null
+            ? "no_source"
+            : Math.min(
+                  interval.new_end - interval.new_start,
+                  interval.original_end - interval.original_start,
+                ) < 2
+              ? "too_short"
+              : "pending",
+        suggested_instruments: [],
+      },
+  );
+}
+function instrumentTimesChanged() {
+  const intervals = forms.master?.intervals || [];
+  return (
+    intervals.length !== instrumentRows.length ||
+    intervals.some((i) => !instrumentRow(i))
+  );
+}
+function formatTime(value) {
+  if (!Number.isFinite(value)) return "Not located";
+  const rounded = Math.round(value * 100);
+  return `${Math.floor(rounded / 6000)}:${((rounded % 6000) / 100).toFixed(2).padStart(5, "0")}`;
+}
+function instrumentTable() {
+  return `<div class="tableWrap instrumentTable"><table aria-label="Instrument comparison results"><thead><tr><th>Your track</th><th>Original</th><th>Estimated sound</th><th>Check</th></tr></thead><tbody>${(
+    forms.master?.intervals || []
+  )
+    .map((i) => {
+      const row = instrumentRow(i);
+      const status = row?.status;
+      const note =
+        status === "checked"
+          ? row.suggested_instruments?.length
+            ? "Possible supporting match"
+            : "No supporting match"
+          : status === "too_short"
+            ? "Under two seconds"
+            : status === "no_source"
+              ? "Source times unavailable"
+              : status === "failed"
+                ? "Try again"
+                : "Pending";
+      const probe = row?.probe;
+      return `<tr><td>${formatTime(i.new_start)}–${formatTime(i.new_end)}</td><td>${i.original_start == null ? "Not located" : `${formatTime(i.original_start)}–${formatTime(i.original_end)}`}</td><td>${esc(soundLabel(i))}</td><td><span>${note}</span>${probe ? `<details><summary>Checked portion</summary><small>Your track: ${formatTime(probe.new_start)}–${formatTime(probe.new_end)}<br>Original: ${formatTime(probe.original_start)}–${formatTime(probe.original_end)}</small></details>` : ""}</td></tr>`;
+    })
+    .join("")}</tbody></table></div>`;
+}
+function applyInstrumentPrefill() {
+  const f = forms.master;
+  if (!f || f.status === "no_use") return;
+  const labels = [
+    ...new Set(
+      f.intervals.flatMap((i) => {
+        const row = instrumentRow(i);
+        return row?.status === "checked" ? row.suggested_instruments || [] : [];
+      }),
+    ),
+  ];
+  const suggestions = { element: labels.join(", ") };
+  if (labels.length) suggestions.method = "Sampled the original recording";
+  for (const [field, value] of Object.entries(suggestions)) {
+    if (
+      !touchedSoundFields.has(field) &&
+      (!f[field] || f[field] === autoSoundFields[field])
+    ) {
+      if (f[field] !== value) {
+        f[field] = value;
+        f.details_confirmed = false;
+        approved = false;
+      }
+      autoSoundFields[field] = value;
+      const input = $(`[data-rights="master"] [data-field="${field}"]`);
+      if (input) input.value = f[field];
+    }
+  }
+}
 function renderInstruments() {
-  const evidence = analysis?.stem_evidence || [];
-  const eligible = analysis?.master?.locate?.sample_occurrences?.some(
-    (i) => Number.isFinite(i.original_start) && Number.isFinite(i.original_end),
+  const rows = currentInstrumentRows();
+  const eligible = rows.some((row) =>
+    ["pending", "failed"].includes(row.status),
   );
   const method = analysis?.methods?.stems || "";
+  const failed = rows.some((row) => row.status === "failed");
   const failure =
     instrumentError ||
-    (method.startsWith("unavailable:")
-      ? "The instrument check could not finish. You can continue using your timestamps or try again."
+    (failed || method.startsWith("unavailable:")
+      ? "The instrument check could not finish. Completed rows are saved; you can continue to your document or retry."
       : "");
+  const pending = rows.some((row) =>
+    ["pending", "failed"].includes(row.status),
+  );
+  const checked = rows.filter((row) => row.status === "checked").length;
+  const tooShort = rows.filter((row) => row.status === "too_short").length;
+  const missingSource = rows.filter((row) => row.status === "no_source").length;
+  const summary = `${checked} of ${rows.length} moments compared${tooShort ? `; ${tooShort} too short to assess` : ""}${missingSource ? `; ${missingSource} missing original times` : ""}.`;
   const header =
-    '<h2>Check the instruments</h2><p class="muted">Optional · Compare bass, drums, vocals and other sounds in one short matched region. This does not check every timestamp.</p>';
+    '<h2>Instruments at each moment</h2><p class="muted">Estimate bass, drums, vocals and other sounds for each matched moment. Each check listens to up to eight seconds of that moment. “Other” does not identify a specific instrument.</p>';
+  const table = instrumentTable();
   if (instrumentBusy)
-    return `${header}<p role="status"><span class="spinner"></span> ${esc(instrumentMessage || "Starting the instrument check…")}</p><button disabled>Instrument check in progress</button>`;
-  if (evidence.length) {
-    const labels = {
-      full_mix: "Full recording (reference)",
-      bass: "Bass",
-      drums: "Drums",
-      vocals: "Vocals",
-      other: "Other sounds",
-    };
-    return `${header}<p role="status">Instrument check complete. These are estimated stems; listen before confirming a sampled instrument.</p><div class="tableWrap"><table aria-label="Instrument comparison results"><thead><tr><th>Original</th><th>Your track</th><th>Result in this region</th></tr></thead><tbody>${evidence.map((x) => `<tr><td>${esc(labels[x.source_stem] || x.source_stem)}</td><td>${esc(labels[x.new_song_stem] || x.new_song_stem)}</td><td>${x.dtw_result === "accepted" ? "Possible supporting match" : x.dtw_result === "weak" ? "Uncertain alignment" : "No supporting match"}</td></tr>`).join("")}</tbody></table></div><p class="muted">Completed results are reused.</p>`;
-  }
-  return `${header}${failure ? `<p role="alert" class="warning">${esc(failure)}</p>` : ""}${method.startsWith("unavailable:") ? `<details><summary>Instrument check details</summary><pre>${esc(method)}</pre></details>` : ""}${instrumentMessage && !failure ? `<p role="status">${esc(instrumentMessage)}</p>` : ""}${eligible ? button(failure ? "Try instrument check again" : "Run instrument check", "stems") : '<p class="muted">This check needs a matched region with timestamps in both recordings. The current analysis has no paired region. You can still continue to your document.</p><button disabled>Instrument check unavailable</button>'}`;
+    return `${header}<p role="status"><span class="spinner"></span> ${esc(instrumentMessage || "Starting the instrument check…")}</p><button disabled>Instrument check in progress</button>${table}`;
+  if (!perMomentSupported)
+    return `${header}<p class="warning">Per-moment instrument checks need the updated analysis service. The earlier single-region result cannot label every timestamp.</p>${table}`;
+  const canRun = eligible && (pending || !rows.length);
+  return `${header}${failure ? `<p role="alert" class="warning">${esc(failure)}</p>` : ""}<p role="status">${summary} Suggested sounds prefill your description; confirm them by listening.</p>${instrumentMessage && !failure ? `<p>${esc(instrumentMessage)}</p>` : ""}${canRun ? button(failure ? "Try instrument check again" : checked ? "Continue instrument checks" : "Run instrument check", "stems") : checked ? '<p class="muted">Completed results are reused.</p>' : '<p class="muted">No eligible paired region of at least two seconds is available. You can still continue to your document.</p><button disabled>Instrument check unavailable</button>'}${table}`;
 }
 function updateInstruments() {
   if ($("#instruments")) $("#instruments").innerHTML = renderInstruments();
+  document.querySelectorAll("[data-instrument-index]").forEach((cell) => {
+    const interval =
+      forms.master?.intervals[Number(cell.dataset.instrumentIndex)];
+    if (interval) cell.textContent = soundLabel(interval);
+  });
 }
 async function startInstrumentCheck() {
   if (instrumentBusy) return;
@@ -256,6 +376,14 @@ async function startInstrumentCheck() {
   instrumentMessage = "Starting the instrument check…";
   updateInstruments();
   try {
+    if (instrumentTimesChanged()) {
+      if (!validTimes(forms.master))
+        throw Error(
+          "Listen and confirm your edited timestamps before checking their instruments.",
+        );
+      if (!(await save())) return;
+    }
+    if (serial !== polling || target !== caseId) return;
     await json(`/api/analyses/${target}/stems`, { method: "POST" });
     if (serial !== polling || target !== caseId) return;
     await poll({ instruments: true });
@@ -276,7 +404,7 @@ function name(r) {
 }
 function renderTimes(r, nested = false) {
   const f = forms[r];
-  return `<div class="track" data-rights="${r}">${nested ? "" : `<h2>${name(r)}</h2>`}<label>${r === "publishing" ? "Did you separately replay a melody or re-sing lyrics?" : "Have you checked this recording sample?"}<select data-field="status"><option value="pending" ${f.status === "pending" ? "selected" : ""}>I’m not sure yet</option><option value="confirmed" ${f.status === "confirmed" ? "selected" : ""}>${r === "publishing" ? "Yes, I replayed or re-sang a part" : "Yes, I used the original recording"}</option><option value="no_use" ${f.status === "no_use" ? "selected" : ""}>${r === "publishing" ? "No separate replay or re-sung part" : "No recording sample"}</option></select></label>${f.status === "no_use" ? '<p class="muted">Nothing else is needed for this check.</p>' : `<label>Suggested times<select data-times="${r}"><option value="pending" ${!f.times_confirmed && !f.edit ? "selected" : ""}>I haven’t checked these yet</option>${f.intervals.length ? `<option value="accept" ${f.times_confirmed && !f.edit ? "selected" : ""}>Yes, use these times</option>` : ""}<option value="edit" ${f.edit ? "selected" : ""}>${f.intervals.length ? "No, let me edit" : "Add times now"}</option></select></label><div class="tableWrap"><table><thead><tr><th>Your track starts (s)</th><th>Ends (s)</th><th>Original starts (s)</th><th>Ends (s)</th>${f.edit ? "<th></th>" : ""}</tr></thead><tbody>${f.intervals.map((i, n) => `<tr>${["new_start", "new_end", "original_start", "original_end"].map((k) => `<td>${f.edit ? `<input type="number" min="0" step=".01" data-interval="${n}:${k}" value="${i[k] ?? ""}" aria-label="${k}">` : esc(i[k] ?? "Not located")}</td>`).join("")}${f.edit ? `<td><button data-remove="${n}">×</button></td>` : ""}</tr>`).join("")}</tbody></table></div>${f.edit ? `${button("Add appearance", "add")}<label><input type="checkbox" data-field="times_confirmed" ${f.times_confirmed ? "checked" : ""}>I’ve listened and confirmed these times</label>` : ""}`}</div>`;
+  return `<div class="track" data-rights="${r}">${nested ? "" : `<h2>${name(r)}</h2>`}<label>${r === "publishing" ? "Did you separately replay a melody or re-sing lyrics?" : "Have you checked this recording sample?"}<select data-field="status"><option value="pending" ${f.status === "pending" ? "selected" : ""}>I’m not sure yet</option><option value="confirmed" ${f.status === "confirmed" ? "selected" : ""}>${r === "publishing" ? "Yes, I replayed or re-sang a part" : "Yes, I used the original recording"}</option><option value="no_use" ${f.status === "no_use" ? "selected" : ""}>${r === "publishing" ? "No separate replay or re-sung part" : "No recording sample"}</option></select></label>${f.status === "no_use" ? '<p class="muted">Nothing else is needed for this check.</p>' : `<label>Suggested times<select data-times="${r}"><option value="pending" ${!f.times_confirmed && !f.edit ? "selected" : ""}>I haven’t checked these yet</option>${f.intervals.length ? `<option value="accept" ${f.times_confirmed && !f.edit ? "selected" : ""}>Yes, use these times</option>` : ""}<option value="edit" ${f.edit ? "selected" : ""}>${f.intervals.length ? "No, let me edit" : "Add times now"}</option></select></label><div class="tableWrap"><table><thead><tr><th>Your track starts (s)</th><th>Ends (s)</th><th>Original starts (s)</th><th>Ends (s)</th>${r === "master" ? "<th>Estimated sound</th>" : ""}${f.edit ? "<th></th>" : ""}</tr></thead><tbody>${f.intervals.map((i, n) => `<tr>${["new_start", "new_end", "original_start", "original_end"].map((k) => `<td>${f.edit ? `<input type="number" min="0" step=".01" data-interval="${n}:${k}" value="${i[k] ?? ""}" aria-label="${k}">` : esc(i[k] ?? "Not located")}</td>`).join("")}${r === "master" ? `<td data-instrument-index="${n}">${esc(soundLabel(i))}</td>` : ""}${f.edit ? `<td><button data-remove="${n}">×</button></td>` : ""}</tr>`).join("")}</tbody></table></div>${f.edit ? `${button("Add appearance", "add")}<label><input type="checkbox" data-field="times_confirmed" ${f.times_confirmed ? "checked" : ""}>I’ve listened and confirmed these times</label>` : ""}`}</div>`;
 }
 async function loadAudio() {
   for (const role of ["original", "new"]) {
@@ -378,9 +506,11 @@ async function poll({ instruments = false } = {}) {
         if (instruments || state.operation === "stems") {
           instrumentBusy = false;
           instrumentError = state.error || "";
-          instrumentMessage = analysis.stem_evidence?.length
-            ? ""
-            : "No instrument comparison results were returned. You can continue to your document.";
+          instrumentMessage = instrumentRows.some(
+            (row) => row.status === "pending",
+          )
+            ? "Some moments still need a check. Continue to process the remaining moments; completed results are reused."
+            : "";
           if (instruments) updateInstruments();
           else {
             step = 2;
@@ -399,7 +529,7 @@ async function poll({ instruments = false } = {}) {
       if (instruments) {
         instrumentMessage =
           state.status === "running"
-            ? "Comparing the instruments. The first check may take a few minutes while the model starts."
+            ? `Comparing the instruments. ${state.instrument_progress ? `${state.instrument_progress.finished} of ${state.instrument_progress.total} moments processed. ` : ""}The first check may take a few minutes while the model starts.`
             : "Instrument check queued. Waiting for the analysis worker.";
         updateInstruments();
       }
@@ -434,12 +564,17 @@ async function loadResult({
   const data = await json(`/api/analyses/${target}/result`);
   if (expectedPoll !== polling || target !== caseId) return false;
   analysis = data.analysis;
+  perMomentSupported = Array.isArray(data.instrument_rows);
+  instrumentRows =
+    data.instrument_rows || analysis.instrument_occurrences || [];
   const corrected = analysis.review.corrected;
   if (!Object.keys(forms).length) {
     for (const r of analysis.input.analysis_scope) {
       const path = corrected?.[r];
       const suggestion = data.suggestions[r];
       const values = suggestion.placement.values;
+      if (r === "master" && path)
+        ["element", "method"].forEach((field) => touchedSoundFields.add(field));
       forms[r] = {
         status: path
           ? path.locate.detection_status === "not_detected"
@@ -448,7 +583,12 @@ async function loadResult({
               ? "confirmed"
               : "pending"
           : "pending",
-        intervals: path ? path.locate.sample_occurrences : suggestion.intervals,
+        intervals: (path
+          ? path.locate.sample_occurrences
+          : suggestion.intervals
+        )
+          .map((i) => ({ ...i }))
+          .sort((a, b) => a.new_start - b.new_start || a.new_end - b.new_end),
         times_confirmed: !!path && path.locate.detection_status === "verified",
         details_confirmed: !!path && !path.locate.review_required,
         element:
@@ -472,6 +612,7 @@ async function loadResult({
       };
     }
   }
+  applyInstrumentPrefill();
   if (corrected && !preserveReview) {
     narrative = corrected.nature_of_use.text;
     reviewer = analysis.review.reviewer || user.displayName || "";
@@ -558,6 +699,8 @@ function gate() {
     throw Error("Mark the document as reviewed before downloading.");
 }
 async function save(approve = false) {
+  const target = caseId,
+    serial = polling;
   const payload = {
     paths: Object.fromEntries(
       Object.entries(forms).map(([r, f]) => [
@@ -595,14 +738,16 @@ async function save(approve = false) {
     notes,
     approve,
   };
-  const value = await json(`/api/analyses/${caseId}/review`, {
+  const value = await json(`/api/analyses/${target}/review`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
+  if (target !== caseId || serial !== polling) return false;
   analysis = value.analysis;
   narrative = analysis.review.corrected.nature_of_use.text;
   if (!payload.narrative) generated = narrative;
   approved = analysis.review.status === "approved";
+  return true;
 }
 async function download(kind) {
   const blob = await (
@@ -631,6 +776,7 @@ $("#view").addEventListener("input", (e) => {
     approved = false;
   } else if (r && el.dataset.field) {
     forms[r][el.dataset.field] = el.type === "checkbox" ? el.checked : el.value;
+    if (r === "master") touchedSoundFields.add(el.dataset.field);
     approved = false;
   }
   if (r && el.dataset.interval) {
@@ -639,6 +785,10 @@ $("#view").addEventListener("input", (e) => {
     forms[r].times_confirmed = false;
     forms[r].details_confirmed = false;
     approved = false;
+    if (r === "master") {
+      applyInstrumentPrefill();
+      updateInstruments();
+    }
   }
 });
 $("#view").addEventListener("change", (e) => {
@@ -698,6 +848,9 @@ $("#view").addEventListener("click", async (e) => {
   if (el.dataset.remove && r) {
     forms[r].intervals.splice(Number(el.dataset.remove), 1);
     forms[r].times_confirmed = false;
+    forms[r].details_confirmed = false;
+    approved = false;
+    applyInstrumentPrefill();
     render();
     return;
   }
