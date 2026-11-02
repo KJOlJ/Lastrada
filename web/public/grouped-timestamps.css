@@ -1,0 +1,57 @@
+.groupedUseSummary {
+  margin: 22px 0 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+.groupedUseSummary h3 {
+  margin: 0 0 6px;
+}
+.groupedUseSummary p {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+.groupedUseTable {
+  margin: 0;
+}
+.groupedUseTable table {
+  min-width: 820px;
+}
+.groupedUseTable th,
+.groupedUseTable td {
+  white-space: nowrap;
+}
+.groupedUseTable td:nth-child(2) {
+  white-space: normal;
+  min-width: 155px;
+}
+.groupBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+}
+.exactTimestamps {
+  margin: 8px 0 22px;
+  padding: 12px 0;
+}
+.exactTimestamps > summary {
+  color: var(--text);
+}
+.exactTimestamps .tableWrap {
+  margin-bottom: 0;
+}
+@media (max-width: 650px) {
+  .groupedUseSummary {
+    padding: 14px;
+  }
+}
