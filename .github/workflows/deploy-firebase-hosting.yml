@@ -72,8 +72,63 @@ jobs:
               'apiBase': api_base,
           }
           Path('web/public/config.json').write_text(json.dumps(config, indent=2) + '\n')
+          Path('/tmp/api-base.txt').write_text(str(api_base))
           PY
           python -m json.tool web/public/config.json >/dev/null
+          echo "LASTRADA_API_BASE=$(cat /tmp/api-base.txt)" >> "${GITHUB_ENV}"
+
+      - name: Set up Google Cloud CLI
+        if: steps.auth.outputs.mode == 'service-account'
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: lastrada-64bab
+
+      - name: Authorize the new Hosting origin for the API and upload bucket
+        if: steps.auth.outputs.mode == 'service-account'
+        run: |
+          set -euo pipefail
+          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+          gcloud config set project lastrada-64bab
+
+          ORIGINS="https://lastrada-64bab.web.app,https://lastrada-64bab.firebaseapp.com,https://lastrada-alt.web.app,https://lastrada-alt.firebaseapp.com"
+          gcloud run services update lastrada-api \
+            --project lastrada-64bab \
+            --region us-central1 \
+            --update-env-vars="^@^LASTRADA_ORIGINS=${ORIGINS}" \
+            --quiet
+
+          cat > /tmp/cors.json <<'JSON'
+          [
+            {
+              "origin": [
+                "https://lastrada-64bab.web.app",
+                "https://lastrada-64bab.firebaseapp.com",
+                "https://lastrada-alt.web.app",
+                "https://lastrada-alt.firebaseapp.com"
+              ],
+              "method": ["PUT", "POST", "GET", "HEAD"],
+              "responseHeader": ["Content-Type", "Location", "Range", "ETag"],
+              "maxAgeSeconds": 3600
+            }
+          ]
+          JSON
+          gcloud storage buckets update \
+            gs://lastrada-64bab-lastrada-cases \
+            --cors-file=/tmp/cors.json
+
+      - name: Verify the Cloud Run CORS preflight
+        if: steps.auth.outputs.mode == 'service-account'
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --request OPTIONS \
+            --header "Origin: https://lastrada-alt.web.app" \
+            --header "Access-Control-Request-Method: POST" \
+            --header "Access-Control-Request-Headers: authorization,content-type" \
+            --dump-header /tmp/cors-headers.txt \
+            --output /dev/null \
+            "${LASTRADA_API_BASE}/api/analyses"
+          grep -qi '^access-control-allow-origin: https://lastrada-alt.web.app' /tmp/cors-headers.txt
 
       - name: Deploy Hosting to lastrada-alt
         env:
@@ -111,5 +166,6 @@ jobs:
             echo "### Firebase Hosting deployed"
             echo "https://lastrada-alt.web.app"
             echo ""
-            echo "Sony, DTW, Demucs, Cloud Run and stored analysis behavior were not changed."
+            echo "The new Hosting origin is authorized for the Cloud Run API and signed uploads."
+            echo "Sony, DTW, Demucs and stored analysis behavior were not changed."
           } >> "${GITHUB_STEP_SUMMARY}"
