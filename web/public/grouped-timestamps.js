@@ -200,6 +200,9 @@ function occurrenceMatchCount(left, right) {
 
 function sameDerivativeRelationship(left, right) {
   if (!left.occurrences.length || !right.occurrences.length) return false;
+  const leftHasSource = left.sourcePassages.length > 0;
+  const rightHasSource = right.sourcePassages.length > 0;
+  if (leftHasSource !== rightHasSource) return false;
   const matches = occurrenceMatchCount(left.occurrences, right.occurrences);
   const smaller = Math.min(left.occurrences.length, right.occurrences.length);
   const larger = Math.max(left.occurrences.length, right.occurrences.length);
