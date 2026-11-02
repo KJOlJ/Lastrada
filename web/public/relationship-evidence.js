@@ -292,9 +292,13 @@ function enrichRelationshipTable(track) {
       cell.className = "relationshipEvidenceCell";
       row.append(cell);
     }
-    cell.innerHTML = families[index]
+    const nextHtml = families[index]
       ? evidenceHtml(families[index])
       : '<span class="evidenceState">Unavailable</span>';
+    if (cell.__lastradaEvidenceHtml !== nextHtml) {
+      cell.__lastradaEvidenceHtml = nextHtml;
+      cell.innerHTML = nextHtml;
+    }
   });
 
   const controls = document.querySelector("#instruments");
@@ -303,11 +307,13 @@ function enrichRelationshipTable(track) {
     controls.classList.add("relationshipEvidenceControls");
     if (controls.parentElement !== summary) summary.insertBefore(controls, tableWrap);
     const heading = controls.querySelector("h2");
-    if (heading) heading.textContent = "Stem + DTW evidence";
+    if (heading && heading.textContent !== "Stem + DTW evidence")
+      heading.textContent = "Stem + DTW evidence";
     const description = controls.querySelector("p.muted");
-    if (description)
-      description.textContent =
-        "Demucs estimates the stem used at each matched moment, then stem-level DTW tests whether that element aligns. Results appear in the final column below.";
+    const descriptionText =
+      "Demucs estimates the stem used at each matched moment, then stem-level DTW tests whether that element aligns. Results appear in the final column below.";
+    if (description && description.textContent !== descriptionText)
+      description.textContent = descriptionText;
   }
 }
 
