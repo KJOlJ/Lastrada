@@ -72,7 +72,8 @@ function sameNewOccurrence(a, b) {
   const aDuration = duration(a.new_start, a.new_end);
   const bDuration = duration(b.new_start, b.new_end);
   const durationRatio =
-    Math.max(aDuration, bDuration) / Math.max(EPSILON, Math.min(aDuration, bDuration));
+    Math.max(aDuration, bDuration) /
+    Math.max(EPSILON, Math.min(aDuration, bDuration));
   return Math.abs(aCenter - bCenter) <= 0.75 && durationRatio <= 2;
 }
 
@@ -127,7 +128,7 @@ function spacing(intervals) {
   return [typical, median(deviations) <= Math.max(0.75, 0.2 * typical)];
 }
 
-function patternFor(
+function detailedPattern(
   occurrences,
   candidateCount,
   newDuration,
@@ -137,19 +138,126 @@ function patternFor(
   const count = occurrences.length;
   if (!sourceKnown)
     return candidateCount >= 3
-      ? "Clustered unresolved candidates"
+      ? "Unresolved repeated candidates"
       : "Unresolved candidate";
 
   const span = count
     ? occurrences[occurrences.length - 1].new_end - occurrences[0].new_start
     : 0;
-  const spread = Number.isFinite(newDuration) && newDuration > 0 ? span / newDuration : 0;
-  if (count >= 3 && spread >= 0.65) return "Likely looped throughout";
-  if (count >= 3 && regularSpacing) return "Likely regular loop";
-  if (count >= 3) return "Repeated use";
-  if (count === 2) return "Repeated twice";
-  if (candidateCount >= 3) return "Continuous or overlapping use";
-  return "Single use";
+  const spread =
+    Number.isFinite(newDuration) && newDuration > 0 ? span / newDuration : 0;
+  if (count >= 3 && spread >= 0.65) return "Repeated across most of the track";
+  if (count >= 3 && regularSpacing) return "Regular repeated use";
+  if (count >= 2) return "Repeated use";
+  if (candidateCount >= 3) return "One continuous or overlapping use";
+  return "One-off use";
+}
+
+function sourcePassage(start, end) {
+  return Number.isFinite(start) && Number.isFinite(end)
+    ? { start: Number(start), end: Number(end) }
+    : null;
+}
+
+function sourcePassagesFromFamily(family) {
+  const [start, end] = representativeSource(family);
+  const passage = sourcePassage(start, end);
+  return passage ? [passage] : [];
+}
+
+function dedupeSourcePassages(passages) {
+  const result = [];
+  for (const passage of passages) {
+    const duplicate = result.find(
+      (existing) =>
+        overlapRatio(
+          passage.start,
+          passage.end,
+          existing.start,
+          existing.end,
+        ) >= 0.5,
+    );
+    if (!duplicate) result.push({ ...passage });
+  }
+  return result.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+function occurrenceMatchCount(left, right) {
+  const used = new Set();
+  let matches = 0;
+  for (const item of left) {
+    const index = right.findIndex(
+      (candidate, candidateIndex) =>
+        !used.has(candidateIndex) && sameNewOccurrence(item, candidate),
+    );
+    if (index >= 0) {
+      used.add(index);
+      matches += 1;
+    }
+  }
+  return matches;
+}
+
+function sameDerivativeRelationship(left, right) {
+  if (!left.occurrences.length || !right.occurrences.length) return false;
+  const matches = occurrenceMatchCount(left.occurrences, right.occurrences);
+  const smaller = Math.min(left.occurrences.length, right.occurrences.length);
+  const larger = Math.max(left.occurrences.length, right.occurrences.length);
+  return matches / smaller >= 0.75 && matches / larger >= 0.6;
+}
+
+function finalizeRelationship(relationship, newDuration) {
+  const occurrences = collapseNewOccurrences(relationship.rawCandidates);
+  const [typicalSpacing, regularSpacing] = spacing(occurrences);
+  const sourcePassages = dedupeSourcePassages(relationship.sourcePassages);
+  return {
+    ...relationship,
+    sourcePassages,
+    sourceStart: sourcePassages[0]?.start ?? null,
+    sourceEnd: sourcePassages[0]?.end ?? null,
+    candidateCount: relationship.rawCandidates.length,
+    occurrenceCount: occurrences.length,
+    firstUse: occurrences[0]?.new_start ?? null,
+    lastUse: occurrences[occurrences.length - 1]?.new_end ?? null,
+    coverageSeconds: mergedCoverage(occurrences),
+    typicalSpacingSeconds: typicalSpacing,
+    regularSpacing,
+    useType: occurrences.length > 1 ? "Repeated" : "One-off",
+    pattern: detailedPattern(
+      occurrences,
+      relationship.rawCandidates.length,
+      newDuration,
+      regularSpacing,
+      sourcePassages.length > 0,
+    ),
+    occurrences,
+  };
+}
+
+function mergeSourceAlternatives(sourceFamilies, newDuration) {
+  const relationships = [];
+  for (const family of sourceFamilies) {
+    const match = relationships.find((relationship) =>
+      sameDerivativeRelationship(relationship, family),
+    );
+    if (!match) {
+      relationships.push({
+        sourcePassages: [...family.sourcePassages],
+        rawCandidates: [...family.rawCandidates],
+        occurrences: [...family.occurrences],
+      });
+    } else {
+      match.sourcePassages.push(...family.sourcePassages);
+      match.rawCandidates.push(...family.rawCandidates);
+      match.occurrences = collapseNewOccurrences([
+        ...match.occurrences,
+        ...family.occurrences,
+      ]);
+    }
+  }
+  return relationships.map((relationship) =>
+    finalizeRelationship(relationship, newDuration),
+  );
 }
 
 export function groupIntervals(intervals, newDuration = null) {
@@ -159,7 +267,7 @@ export function groupIntervals(intervals, newDuration = null) {
       Number.isFinite(item.new_end) &&
       item.new_end > item.new_start,
   );
-  const families = [];
+  const rawFamilies = [];
   const ordered = [...valid].sort(
     (a, b) =>
       Number.isFinite(b.original_start) - Number.isFinite(a.original_start) ||
@@ -170,58 +278,40 @@ export function groupIntervals(intervals, newDuration = null) {
   for (const interval of ordered) {
     let bestFamily = null;
     let bestScore = -1;
-    for (const family of families) {
+    for (const family of rawFamilies) {
       const score = sourceFamilyScore(interval, family);
       if (score > bestScore) {
         bestScore = score;
         bestFamily = family;
       }
     }
-    if (!bestFamily || bestScore < 0) families.push([interval]);
+    if (!bestFamily || bestScore < 0) rawFamilies.push([interval]);
     else bestFamily.push(interval);
   }
 
-  const summaries = families
-    .map((family) => {
-      const occurrences = collapseNewOccurrences(family);
-      if (!occurrences.length) return null;
-      const [sourceStart, sourceEnd] = representativeSource(family);
-      const [typicalSpacing, regularSpacing] = spacing(occurrences);
-      return {
-        sourceStart,
-        sourceEnd,
-        candidateCount: family.length,
-        occurrenceCount: occurrences.length,
-        firstUse: occurrences[0].new_start,
-        lastUse: occurrences[occurrences.length - 1].new_end,
-        coverageSeconds: mergedCoverage(occurrences),
-        typicalSpacingSeconds: typicalSpacing,
-        regularSpacing,
-        pattern: patternFor(
-          occurrences,
-          family.length,
-          newDuration,
-          regularSpacing,
-          sourceStart != null,
-        ),
-        occurrences,
-        rawCandidates: [...family].sort(
-          (a, b) => a.new_start - b.new_start || a.new_end - b.new_end,
-        ),
-      };
-    })
-    .filter(Boolean)
+  const sourceFamilies = rawFamilies
+    .map((family) => ({
+      sourcePassages: sourcePassagesFromFamily(family),
+      rawCandidates: [...family].sort(
+        (a, b) => a.new_start - b.new_start || a.new_end - b.new_end,
+      ),
+      occurrences: collapseNewOccurrences(family),
+    }))
+    .filter((family) => family.occurrences.length);
+
+  const relationships = mergeSourceAlternatives(sourceFamilies, newDuration)
     .sort(
       (a, b) =>
         b.occurrenceCount - a.occurrenceCount ||
         b.candidateCount - a.candidateCount ||
-        a.firstUse - b.firstUse,
-    );
+        (a.firstUse ?? Infinity) - (b.firstUse ?? Infinity),
+    )
+    .map((relationship, index) => ({
+      ...relationship,
+      groupNumber: index + 1,
+    }));
 
-  return summaries.map((family, index) => ({
-    ...family,
-    groupNumber: index + 1,
-  }));
+  return relationships;
 }
 
 function timestamp(seconds) {
@@ -260,24 +350,56 @@ function rowsFromTable(table) {
     );
 }
 
+function sourcePassageHtml(family) {
+  if (!family.sourcePassages.length)
+    return '<span class="muted">Original passage not located</span>';
+  const chips = family.sourcePassages
+    .map(
+      (passage) =>
+        `<span class="timestampChip">${timestamp(passage.start)}–${timestamp(passage.end)}</span>`,
+    )
+    .join("");
+  const note =
+    family.sourcePassages.length > 1
+      ? '<small>Alternative original occurrences</small>'
+      : "";
+  return `<div class="timestampChips">${chips}</div>${note}`;
+}
+
+function derivativeTimestampHtml(family) {
+  const visibleLimit = 6;
+  const visible = family.occurrences.slice(0, visibleLimit);
+  const remaining = family.occurrences.slice(visibleLimit);
+  const chips = visible
+    .map(
+      (item) =>
+        `<span class="timestampChip">${timestamp(item.new_start)}–${timestamp(item.new_end)}</span>`,
+    )
+    .join("");
+  if (!remaining.length) return `<div class="timestampChips">${chips}</div>`;
+  const more = remaining
+    .map(
+      (item) =>
+        `<span class="timestampChip">${timestamp(item.new_start)}–${timestamp(item.new_end)}</span>`,
+    )
+    .join("");
+  return `<div class="timestampChips">${chips}</div>
+    <details class="moreTimestamps"><summary>View ${remaining.length} more</summary><div class="timestampChips">${more}</div></details>`;
+}
+
 function summaryTable(families) {
-  return `<section class="groupedUseSummary" aria-label="Grouped use pattern">
-    <h3>Grouped use pattern</h3>
-    <p class="muted">Overlapping Sony windows that point to the same source passage are collapsed into use groups. Every exact timestamp remains available below.</p>
+  return `<section class="groupedUseSummary" aria-label="Sample relationships">
+    <h3>Sample relationships</h3>
+    <p class="muted">Each row links one original passage, or a set of equivalent original passages, to the derivative timestamps that matched it. Overlapping detector windows are counted once.</p>
     <div class="tableWrap groupedUseTable"><table>
-      <thead><tr><th>Group</th><th>Pattern</th><th>Source passage</th><th>Uses</th><th>Candidate rows</th><th>First use</th><th>Last use</th><th>Coverage</th><th>Typical spacing</th></tr></thead>
+      <thead><tr><th>Original track</th><th>Derivative track</th><th>Type of sampling</th><th>Matched derivative timestamps</th></tr></thead>
       <tbody>${families
         .map(
           (family) => `<tr>
-            <td><span class="groupBadge">G${family.groupNumber}</span></td>
-            <td><strong>${family.pattern}</strong></td>
-            <td>${family.sourceStart == null ? "Source not identified" : `${timestamp(family.sourceStart)}–${timestamp(family.sourceEnd)}`}</td>
-            <td>${family.occurrenceCount}</td>
-            <td>${family.candidateCount}</td>
-            <td>${timestamp(family.firstUse)}</td>
-            <td>${timestamp(family.lastUse)}</td>
-            <td>${family.coverageSeconds.toFixed(1)}s</td>
-            <td>${family.typicalSpacingSeconds == null ? "—" : `${family.typicalSpacingSeconds.toFixed(1)}s`}</td>
+            <td>${sourcePassageHtml(family)}</td>
+            <td><strong>${family.occurrenceCount} matched ${family.occurrenceCount === 1 ? "use" : "uses"}</strong><small>${family.pattern}</small></td>
+            <td><span class="useType ${family.useType === "Repeated" ? "repeated" : "oneOff"}">${family.useType}</span></td>
+            <td>${derivativeTimestampHtml(family)}</td>
           </tr>`,
         )
         .join("")}</tbody>
@@ -303,37 +425,11 @@ function enhanceTrack(track) {
   );
   if (!families.length) return;
 
-  const groupByRow = new Map();
-  for (const family of families)
-    for (const item of family.rawCandidates)
-      groupByRow.set(item.rowIndex, family.groupNumber);
-
-  const header = table.tHead?.rows[0];
-  if (header) {
-    const th = document.createElement("th");
-    th.textContent = "Group";
-    header.insertBefore(th, header.firstElementChild);
-  }
-
-  const ordered = [...rows].sort(
-    (a, b) =>
-      (groupByRow.get(a.rowIndex) ?? Infinity) -
-        (groupByRow.get(b.rowIndex) ?? Infinity) ||
-      a.new_start - b.new_start ||
-      a.new_end - b.new_end,
-  );
-  for (const item of ordered) {
-    const td = document.createElement("td");
-    td.innerHTML = `<span class="groupBadge">G${groupByRow.get(item.rowIndex)}</span>`;
-    item.row.insertBefore(td, item.row.firstElementChild);
-    table.tBodies[0].append(item.row);
-  }
-
   tableWrap.insertAdjacentHTML("beforebegin", summaryTable(families));
   const details = document.createElement("details");
   details.className = "exactTimestamps";
   const summary = document.createElement("summary");
-  summary.textContent = `View all ${rows.length} exact timestamp suggestion${rows.length === 1 ? "" : "s"}`;
+  summary.textContent = `Technical detail: view all ${rows.length} Sony / DTW candidate rows`;
   tableWrap.parentNode.insertBefore(details, tableWrap);
   details.append(summary, tableWrap);
 }
