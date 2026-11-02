@@ -16,36 +16,93 @@
   margin: 0;
 }
 .groupedUseTable table {
-  min-width: 820px;
+  min-width: 780px;
+  table-layout: fixed;
 }
 .groupedUseTable th,
 .groupedUseTable td {
-  white-space: nowrap;
-}
-.groupedUseTable td:nth-child(2) {
+  vertical-align: top;
   white-space: normal;
-  min-width: 155px;
 }
-.groupBadge {
+.groupedUseTable th:nth-child(1),
+.groupedUseTable td:nth-child(1) {
+  width: 22%;
+}
+.groupedUseTable th:nth-child(2),
+.groupedUseTable td:nth-child(2) {
+  width: 19%;
+}
+.groupedUseTable th:nth-child(3),
+.groupedUseTable td:nth-child(3) {
+  width: 15%;
+}
+.groupedUseTable th:nth-child(4),
+.groupedUseTable td:nth-child(4) {
+  width: 44%;
+}
+.groupedUseTable td strong,
+.groupedUseTable td small {
+  display: block;
+}
+.groupedUseTable td small {
+  margin-top: 4px;
+  line-height: 1.35;
+}
+.timestampChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.timestampChip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 34px;
-  padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
+  padding: 3px 8px;
   background: var(--field);
   color: var(--text);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.useType {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
   font-weight: 750;
-  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.useType.repeated {
+  border: 1px solid #7d62d9;
+  background: color-mix(in srgb, #7d62d9 18%, var(--surface));
+}
+.useType.oneOff {
+  border: 1px solid var(--border);
+  background: var(--field);
+}
+.moreTimestamps {
+  margin-top: 7px;
+  padding: 0;
+  border: 0;
+}
+.moreTimestamps > summary {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.moreTimestamps[open] > summary {
+  margin-bottom: 7px;
 }
 .exactTimestamps {
   margin: 8px 0 22px;
   padding: 12px 0;
 }
 .exactTimestamps > summary {
-  color: var(--text);
+  color: var(--muted);
+  font-size: 13px;
 }
 .exactTimestamps .tableWrap {
   margin-bottom: 0;
@@ -53,5 +110,27 @@
 @media (max-width: 650px) {
   .groupedUseSummary {
     padding: 14px;
+  }
+  .groupedUseTable table {
+    min-width: 680px;
+  }
+}
+@media print {
+  .exactTimestamps {
+    display: none !important;
+  }
+  .groupedUseSummary {
+    break-inside: avoid;
+  }
+  .groupedUseTable {
+    overflow: visible;
+  }
+  .groupedUseTable table {
+    min-width: 0;
+    font-size: 10px;
+  }
+  .timestampChip {
+    font-size: 9px;
+    padding: 2px 5px;
   }
 }
