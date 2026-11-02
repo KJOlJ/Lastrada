@@ -1,9 +1,37 @@
-.groupedUseTable table {
-  min-width: 1120px;
+.groupedUseTable {
+  overflow: visible;
 }
-.groupedUseTable th:last-child,
-.groupedUseTable td:last-child {
-  min-width: 260px;
+.groupedUseTable table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.groupedUseTable th,
+.groupedUseTable td {
+  min-width: 0;
+  padding: 12px 9px;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.groupedUseTable th:nth-child(1),
+.groupedUseTable td:nth-child(1) {
+  width: 14%;
+}
+.groupedUseTable th:nth-child(2),
+.groupedUseTable td:nth-child(2) {
+  width: 14%;
+}
+.groupedUseTable th:nth-child(3),
+.groupedUseTable td:nth-child(3) {
+  width: 13%;
+}
+.groupedUseTable th:nth-child(4),
+.groupedUseTable td:nth-child(4) {
+  width: 32%;
+}
+.groupedUseTable th:nth-child(5),
+.groupedUseTable td:nth-child(5) {
+  width: 27%;
 }
 .relationshipEvidenceCell {
   vertical-align: top;
@@ -11,7 +39,7 @@
 }
 .relationshipEvidenceControls {
   position: relative;
-  margin: 16px 0 18px;
+  margin: 14px 0 18px;
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -22,7 +50,7 @@
   font-size: 18px;
 }
 .relationshipEvidenceControls p {
-  margin: 6px 0 12px;
+  margin: 6px 0 10px;
 }
 .relationshipEvidenceControls > .instrumentTable {
   position: absolute !important;
@@ -39,36 +67,42 @@
 }
 .stemEvidenceList {
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 .stemEvidenceItem {
-  padding: 8px 9px;
+  padding: 7px 8px;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--surface);
 }
 .stemEvidenceItem > div {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 7px;
 }
 .stemEvidenceItem strong {
-  font-size: 13px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.35;
 }
 .stemEvidenceItem small,
 .evidenceProgress,
 .evidenceState + small {
   display: block;
   margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 .dtwResult {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 11px;
+  padding: 2px 6px;
+  font-size: 10px;
   font-weight: 750;
   white-space: nowrap;
 }
@@ -96,12 +130,14 @@ body.light .dtwResult.rejected {
 .evidenceState {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--field);
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 .moreStemEvidence {
   margin-top: 7px;
@@ -109,16 +145,86 @@ body.light .dtwResult.rejected {
   border: 0;
 }
 .moreStemEvidence > summary {
-  font-size: 12px;
+  font-size: 11px;
 }
 .moreStemEvidence .stemEvidenceList {
   margin-top: 7px;
 }
-@media (max-width: 650px) {
-  .groupedUseTable table {
-    min-width: 980px;
+@media (max-width: 780px) {
+  .groupedUseSummary {
+    padding: 14px;
+  }
+  .groupedUseTable table,
+  .groupedUseTable thead,
+  .groupedUseTable tbody,
+  .groupedUseTable tr,
+  .groupedUseTable th,
+  .groupedUseTable td {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  .groupedUseTable thead {
+    position: absolute;
+    width: 1px !important;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+  }
+  .groupedUseTable tbody {
+    display: grid;
+    gap: 12px;
+  }
+  .groupedUseTable tbody tr {
+    padding: 11px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--surface) 72%, transparent);
+  }
+  .groupedUseTable tbody td {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .groupedUseTable tbody td:last-child {
+    border-bottom: 0;
+  }
+  .groupedUseTable tbody td::before {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+  .groupedUseTable tbody td:nth-child(1)::before {
+    content: "Original track";
+  }
+  .groupedUseTable tbody td:nth-child(2)::before {
+    content: "Derivative track";
+  }
+  .groupedUseTable tbody td:nth-child(3)::before {
+    content: "Sampling type";
+  }
+  .groupedUseTable tbody td:nth-child(4)::before {
+    content: "Matched timestamps";
+  }
+  .groupedUseTable tbody td:nth-child(5)::before {
+    content: "Stem + DTW";
   }
   .relationshipEvidenceControls {
     padding: 12px;
+  }
+}
+@media print {
+  .groupedUseTable table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+  .relationshipEvidenceControls {
+    break-inside: avoid;
   }
 }
