@@ -1,5 +1,5 @@
-#instruments button[data-action="stems"],
-#instruments button:disabled {
+.automaticInstrumentControls button[data-action="stems"],
+.automaticInstrumentControls button:disabled {
   display: none !important;
 }
 
