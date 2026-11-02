@@ -1,0 +1,88 @@
+name: Deploy Firebase Hosting
+
+on:
+  push:
+    branches: [feat/firebase-web]
+    paths:
+      - web/public/**
+      - firebase.json
+      - .firebaserc
+      - .github/workflows/deploy-firebase-hosting.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-hosting-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out validated frontend
+        uses: actions/checkout@v4
+
+      - name: Select Firebase credentials
+        id: auth
+        shell: bash
+        env:
+          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LASTRADA_64BAB || secrets.FIREBASE_SERVICE_ACCOUNT || secrets.GCP_SA_KEY || secrets.GOOGLE_CREDENTIALS || secrets.GCP_CREDENTIALS }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${FIREBASE_SA}" ]; then
+            printf '%s' "${FIREBASE_SA}" > "${RUNNER_TEMP}/firebase-service-account.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/firebase-service-account.json" >> "${GITHUB_ENV}"
+            echo "mode=service-account" >> "${GITHUB_OUTPUT}"
+          elif [ -n "${FIREBASE_TOKEN}" ]; then
+            echo "mode=token" >> "${GITHUB_OUTPUT}"
+          else
+            echo "No Firebase deployment credential is configured in GitHub Actions." >&2
+            echo "Add FIREBASE_SERVICE_ACCOUNT_LASTRADA_64BAB or FIREBASE_TOKEN as a repository secret." >&2
+            exit 1
+          fi
+
+      - name: Preserve the live Firebase and Cloud Run configuration
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 4 \
+            "https://lastrada-64bab.web.app/config.json" \
+            --output web/public/config.json
+          python -m json.tool web/public/config.json >/dev/null
+
+      - name: Deploy Hosting only
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          AUTH_MODE: ${{ steps.auth.outputs.mode }}
+        run: |
+          set -euo pipefail
+          if [ "${AUTH_MODE}" = "token" ]; then
+            npx --yes firebase-tools@15.4.0 deploy \
+              --only hosting \
+              --project lastrada-64bab \
+              --config firebase.json \
+              --token "${FIREBASE_TOKEN}" \
+              --non-interactive
+          else
+            npx --yes firebase-tools@15.4.0 deploy \
+              --only hosting \
+              --project lastrada-64bab \
+              --config firebase.json \
+              --non-interactive
+          fi
+
+      - name: Verify grouped timestamp assets are live
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+            "https://lastrada-64bab.web.app/grouped-timestamps.js?revision=${GITHUB_SHA}" \
+            --output /tmp/grouped-timestamps.js
+          grep -q "Grouped use pattern" /tmp/grouped-timestamps.js
+          {
+            echo "### Firebase Hosting deployed"
+            echo "https://lastrada-64bab.web.app"
+            echo ""
+            echo "Backend services were not changed."
+          } >> "${GITHUB_STEP_SUMMARY}"
