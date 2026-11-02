@@ -13,7 +13,7 @@ from lastrada.schemas.models import Intake, Work, PLACEMENT_CLASSES, Feature, In
 from lastrada.reporting.review import reviewed_copy
 from lastrada.reporting.export import json_report
 from lastrada.reporting.comparison import spectral_view, comparison_figure
-from lastrada.pipeline import reuse_preview
+from lastrada.pipeline import reuse_preview, run_stem_probe, short_stem_candidate
 from lastrada.reporting.document import (
     document_text,
     document_html,
@@ -26,7 +26,12 @@ from lastrada.recognition.sampleid_adapter import SampleIDAdapter, SampleIDUnava
 from lastrada.ingestion.dataset import load_dataset, retrieve_examples
 from lastrada.ingestion.filenames import prefill_credits
 from lastrada.config import load_settings
-from lastrada.reporting.suggestions import suggested_intervals, timing_questions, confirmed_prefills
+from lastrada.reporting.suggestions import (
+    suggested_intervals,
+    timing_questions,
+    confirmed_prefills,
+    timing_prefills,
+)
 
 settings = load_settings()
 
@@ -83,9 +88,7 @@ def _download_sampleid_checkpoint(url):
                     if chunk:
                         output.write(chunk)
         if not _valid_sampleid_checkpoint(partial):
-            raise RuntimeError(
-                "downloaded file is incomplete or is not a valid PyTorch checkpoint"
-            )
+            raise RuntimeError("downloaded file is incomplete or is not a valid PyTorch checkpoint")
         partial.replace(destination)
         return destination.resolve()
     except Exception:
@@ -129,6 +132,34 @@ def resolve_sampleid_checkpoint(override=None, allow_download=False):
         "~/.lastrada_sampleid/ or checkpoints/. For Streamlit Cloud, configure "
         "LASTRADA_SAMPLEID_CHECKPOINT_URL as a direct-download secret."
     )
+
+
+def _stem_evidence_frame(result):
+    columns = [
+        "Candidate",
+        "Source stem",
+        "New-song stem",
+        "DTW result",
+        "Duration ratio",
+        "Interpretation",
+    ]
+    rows = [
+        {
+            "Candidate": item.candidate_number,
+            "Source stem": item.source_stem,
+            "New-song stem": item.new_song_stem,
+            "DTW result": item.dtw_result,
+            "Duration ratio": (
+                f"{item.duration_ratio:.2f}×" if item.duration_ratio is not None else "—"
+            ),
+            "Interpretation": item.interpretation,
+        }
+        for item in getattr(result, "stem_evidence", [])
+    ]
+    frame = pd.DataFrame(rows, columns=columns)
+    if not frame.empty and frame["Candidate"].nunique() == 1:
+        frame = frame.drop(columns=["Candidate"])
+    return frame
 
 
 st.set_page_config(
@@ -350,9 +381,10 @@ with st.sidebar:
                 "Direct waveform matching or guarded DTW then refines those timings."
             ),
         )
-        detected_checkpoint, checkpoint_note = resolve_sampleid_checkpoint(
-            allow_download=False
+        st.caption(
+            "Instrument separation is optional after analysis. It never runs during the main check."
         )
+        detected_checkpoint, checkpoint_note = resolve_sampleid_checkpoint(allow_download=False)
         sampleid_checkpoint_override = st.text_input(
             "Sony checkpoint path · optional local override",
             value=detected_checkpoint or "",
@@ -368,14 +400,30 @@ with st.sidebar:
             )
         elif use_sampleid:
             st.caption(checkpoint_note)
-        st.caption(
-            "Automated matches remain candidate evidence and require listening review."
-        )
+        st.caption("Automated matches remain candidate evidence and require listening review.")
+
+
+def replay_answer():
+    answer = st.session_state.get("replay_choice")
+    st.session_state.review_publishing_status = {
+        "No — I used the recording only": "not_detected",
+        "Yes — I replayed or re-sang a part": "verified",
+        "I’m not sure yet": "unknown",
+    }[answer]
+    check_use("publishing")
 
 
 def check_use(rights):
     prefix = f"review_{rights}_"
     absent = st.session_state.get(prefix + "status") == "not_detected"
+    if rights == "publishing":
+        st.session_state.replay_choice = (
+            "No — I used the recording only"
+            if absent
+            else "Yes — I replayed or re-sang a part"
+            if st.session_state.get(prefix + "status") == "verified"
+            else "I’m not sure yet"
+        )
     st.session_state[prefix + "checked"] = absent
     if absent:
         st.session_state[prefix + "agreement"] = (
@@ -386,22 +434,50 @@ def check_use(rights):
         st.session_state[prefix + "times_confirmed"] = False
 
 
+def edit_times(rights):
+    st.session_state[f"review_{rights}_times_confirmed"] = False
+    st.session_state[f"review_{rights}_checked"] = False
+
+
 def accept_times(rights):
     prefix = f"review_{rights}_"
     if st.session_state.get(prefix + "status") == "not_detected":
         return
     if st.session_state.get(prefix + "agreement") == "Yes, use these times":
         st.session_state[prefix + "status"] = "verified"
+        if rights == "publishing":
+            st.session_state.replay_choice = "Yes — I replayed or re-sang a part"
     else:
         st.session_state[prefix + "times_confirmed"] = False
+
+
+def update_section_placement(rights):
+    prefix = f"review_{rights}_"
+    from lastrada.classification.placement import classify
+
+    sections = st.session_state.get(prefix + "sections", [])
+    suggestion = classify(0.0, [], sections, expert=True).placement
+    if suggestion:
+        st.session_state[prefix + "placement"] = suggestion.value
+        st.session_state.get(prefix + "timing_defaults", {}).pop("placement", None)
+    st.session_state[prefix + "checked"] = False
 
 
 def apply_suggestion(rights, kind):
     prefix = f"review_{rights}_"
     for field, value in confirmed_prefills(kind, rights).items():
         existing = st.session_state.get(prefix + field)
-        if existing in (None, "", "Needs review"):
+        previous = st.session_state.get(prefix + "timing_defaults", {})
+        if existing in (None, "", "Needs review") or existing == previous.get(field):
             st.session_state[prefix + field] = value
+            previous.pop(field, None)
+
+
+@st.cache_resource
+def heavy_analysis_slot():
+    from threading import Lock
+
+    return Lock()
 
 
 def listen_assets(result):
@@ -454,7 +530,7 @@ with views[0]:
     with st.container(key="stage_0"):
         st.subheader("Step 1 · Add your tracks")
         st.caption(
-            "You’ll need the original track, your new track, and the title and artist for each. MP3 files work."
+            "Add the original and your track. MP3 files work. If the filenames include titles and artists, we’ll go straight to the analysis; otherwise we’ll ask for the missing credits first."
         )
         left, right = st.columns(2, gap="large")
         with left, st.container(border=False):
@@ -490,18 +566,26 @@ with views[0]:
                 "Synthetic demo selected. Generated audio will be used instead of your uploads."
             )
         if st.button(
-            "Next: Track details →",
+            "Find my sample →",
             key="next_uploads",
             type="primary",
             disabled=not synthetic and (not original_file or not new_file),
         ):
             try:
-                with st.spinner("Finding suggested moments…"):
-                    st.session_state.preview_analysis = prepare_preview(
-                        original_file, new_file, synthetic
-                    )
-                st.session_state.pending_workflow_tab = WORKFLOW_STEPS[1]
-                st.rerun()
+                ready_credits = not synthetic and all(
+                    str(st.session_state.get(key, "")).strip()
+                    for key in ("original_title", "original_artist", "new_title", "new_artist")
+                )
+                if ready_credits:
+                    st.session_state.auto_analyze_upload = True
+                else:
+                    if synthetic:
+                        with st.spinner("Finding suggested moments…"):
+                            st.session_state.preview_analysis = prepare_preview(
+                                original_file, new_file, synthetic
+                            )
+                    st.session_state.pending_workflow_tab = WORKFLOW_STEPS[1]
+                    st.rerun()
             except (ValueError, RuntimeError, OSError) as exc:
                 st.error(str(exc))
     with st.container(key="stage_1"):
@@ -552,7 +636,10 @@ with views[0]:
                     placeholder="Artist or group",
                 )
             st.divider()
-            st.markdown("#### What kind of reuse are you documenting?")
+            st.markdown("#### Check both types of reuse")
+            st.caption(
+                "Recommended: look for a recording sample and check whether any music was separately replayed or re-sung. You can rule out a type after listening."
+            )
             scope = st.radio(
                 "Type of reuse",
                 ["Both", "Master", "Publishing"],
@@ -560,12 +647,12 @@ with views[0]:
                 format_func=lambda x: {
                     "Master": "Sampled the recording",
                     "Publishing": "Replayed or re-sang it",
-                    "Both": "Both / check both",
+                    "Both": "Check both types — recommended",
                 }[x],
                 help="Using the actual recording involves master rights. Replaying a melody or re-singing lyrics involves publishing rights. These are separate findings.",
             )
             st.caption(
-                "Not sure? Choose both. Recording samples and replayed melodies or lyrics are documented separately."
+                "Start with Check both. We’ll look for reused recording audio and ask whether you also replayed a melody or re-sang lyrics. Checking both does not mean both happened, and you won’t need to invent a second set of timestamps."
             )
             with st.expander("Case reference and recording versions · optional"):
                 case_id = st.text_input(
@@ -587,7 +674,11 @@ with views[0]:
             submitted = st.form_submit_button(
                 "Find suggested moments", type="primary", width="stretch"
             )
-        if submitted:
+        if submitted or st.session_state.pop("auto_analyze_upload", False):
+            analysis_slot = heavy_analysis_slot()
+            if not analysis_slot.acquire(blocking=False):
+                st.toast("Another analysis is running. Wait a moment, then try again.")
+                st.stop()
             try:
                 if not synthetic and (not original_file or not new_file):
                     raise ValueError("Add both the original and new recordings to start.")
@@ -612,6 +703,10 @@ with views[0]:
                     ),
                     analysis_scope=["publishing", "master"] if scope == "Both" else [scope.lower()],
                 )
+                run_stem_assistance = False
+                analysis_settings = settings.model_copy(
+                    update={"stem_enabled": run_stem_assistance}
+                )
                 analysis_start = perf_counter()
                 t = perf_counter()
                 reusable = "preview_analysis" in st.session_state and st.session_state.get(
@@ -633,7 +728,7 @@ with views[0]:
                     sampleid_checkpoint_override,
                     allow_download=use_sampleid,
                 )
-                if use_sampleid and "master" in intake.analysis_scope:
+                if use_sampleid:
                     if checkpoint is None:
                         adapter_error = checkpoint_note
                         st.warning(
@@ -656,7 +751,9 @@ with views[0]:
                                 + ". PF-NMF will remain available as fallback context."
                             )
                 adapter_setup_time = perf_counter() - adapter_setup_start
-                reused_preview = reusable and (not use_sampleid or adapter is None)
+                reused_preview = (
+                    reusable and (not use_sampleid or adapter is None) and not run_stem_assistance
+                )
                 with st.spinner("Measuring audio locally…"):
                     result = (
                         reuse_preview(st.session_state.preview_analysis, intake)
@@ -667,9 +764,11 @@ with views[0]:
                             new,
                             adapter=adapter,
                             synthetic=synthetic,
-                            settings=settings,
+                            settings=analysis_settings,
                         )
                     )
+                # Keep the review fragment from retaining the loaded Sony model.
+                adapter = None
                 if adapter_error:
                     result.methods["sampleid"] = f"unavailable: {adapter_error}"
                     result.warnings.append(adapter_error)
@@ -689,6 +788,8 @@ with views[0]:
                     "spectral_views",
                     "comparison_plot",
                     "comparison_signature",
+                    "stem_probe_cache",
+                    "replay_choice",
                 ):
                     st.session_state.pop(asset, None)
                 # Clear prior case's review widgets and exports.
@@ -699,6 +800,8 @@ with views[0]:
                 st.rerun()
             except (ValueError, RuntimeError, OSError) as exc:
                 st.error(str(exc))
+            finally:
+                analysis_slot.release()
         st.divider()
         st.button(
             "Next: Listen & explore →",
@@ -783,7 +886,9 @@ if current_step == 2:
                                     pd.DataFrame(
                                         [
                                             {
-                                                "method": method_labels.get(item.source, item.source),
+                                                "method": method_labels.get(
+                                                    item.source, item.source
+                                                ),
                                                 "original_start": item.original_start,
                                                 "original_end": item.original_end,
                                                 "new_start": item.new_start,
@@ -800,8 +905,7 @@ if current_step == 2:
                             st.warning(
                                 "Sony + DTW did not run. The moments below are PF-NMF "
                                 "fallback estimates and may not include original-track "
-                                "timestamps. Reason: "
-                                + (reason or "unknown SampleID setup error")
+                                "timestamps. Reason: " + (reason or "unknown SampleID setup error")
                             )
                         elif sampleid_method == "local_cpu_chunk_embeddings":
                             st.info(
@@ -855,7 +959,107 @@ def render_review():
         st.rerun(scope="app")
     result = st.session_state.get("analysis")
     if result is not None:
+        if current_step == 2:
+            with st.expander("Explore instruments · optional"):
+                st.caption(
+                    "An extra check of one short matched passage using four estimated stems: vocals, drums, bass and other. This is not needed for your Nature of Use. Completed results are reused."
+                )
+                probe = short_stem_candidate(
+                    result.master.locate.sample_occurrences, settings.stem_probe_seconds
+                )
+                if probe is None:
+                    st.caption(
+                        "A paired original/new-track match is needed first. PF-NMF-only estimates do not locate the original passage."
+                    )
+                else:
+                    st.caption(
+                        f"Your track {probe.new_start:.1f}–{probe.new_end:.1f}s · Original {probe.original_start:.1f}–{probe.original_end:.1f}s · plus 1s context at each edge"
+                    )
+                    cache_key = (
+                        st.session_state.get("preview_identity"),
+                        probe.model_dump_json(),
+                        "htdemucs-light-v1",
+                    )
+                    completed = st.session_state.get("stem_probe_cache", {})
+                    if st.button(
+                        "Explore instruments"
+                        if cache_key not in completed
+                        else "Show saved instrument check",
+                        key="run_stem_probe",
+                    ):
+                        if cache_key in completed:
+                            saved_probe = completed[cache_key]
+                            result = result.model_copy(deep=True)
+                            result.stem_evidence = saved_probe.stem_evidence
+                            result.methods.update(
+                                {
+                                    k: v
+                                    for k, v in saved_probe.methods.items()
+                                    if k in ("stems", "stem_probe")
+                                }
+                            )
+                            st.session_state.analysis = result
+                        else:
+                            slot = heavy_analysis_slot()
+                            if not slot.acquire(blocking=False):
+                                st.info("Another instrument check is running. Try again shortly.")
+                            else:
+                                try:
+                                    with st.spinner("Checking this short passage…"):
+                                        result = run_stem_probe(
+                                            result,
+                                            st.session_state.original_audio,
+                                            st.session_state.new_audio,
+                                            settings,
+                                        )
+                                    st.session_state.analysis = result
+                                    if result.stem_evidence:
+                                        completed[cache_key] = result
+                                        st.session_state.stem_probe_cache = completed
+                                finally:
+                                    slot.release()
+                stem_frame = _stem_evidence_frame(result)
+                if not stem_frame.empty:
+                    st.dataframe(stem_frame, hide_index=True)
+                    st.caption(
+                        "Estimated stems may bleed into one another. These are supporting listening clues, not confirmed instruments."
+                    )
+                elif "stem_probe" in result.methods:
+                    st.info(result.methods.get("stems", "No instrument result available."))
         reviewed_paths = {}
+        section_ranges = []
+        section_map_error = None
+        with st.container(key="stage_4_structure"):
+            with st.expander("Map song sections once · optional"):
+                st.caption(
+                    "If you know when your verses, choruses or bridge begin and end, add them here. We’ll match sample timestamps to these sections and prefill both checks. Timestamps alone do not identify section names."
+                )
+                structure = st.data_editor(
+                    pd.DataFrame(columns=["section", "start", "end"]),
+                    num_rows="dynamic",
+                    key="review_song_sections",
+                    column_config={
+                        "section": st.column_config.SelectboxColumn(
+                            "Song section", options=["intro", "verse", "chorus", "bridge", "outro"]
+                        ),
+                        "start": st.column_config.NumberColumn("Starts (seconds)", min_value=0.0),
+                        "end": st.column_config.NumberColumn("Ends (seconds)", min_value=0.0),
+                    },
+                )
+                for row in structure.to_dict("records"):
+                    if all(pd.isna(value) for value in row.values()):
+                        continue
+                    if (
+                        row["section"] not in {"intro", "verse", "chorus", "bridge", "outro"}
+                        or pd.isna(row["start"])
+                        or pd.isna(row["end"])
+                        or not 0 <= row["start"] < row["end"] <= result.durations["new"]
+                    ):
+                        section_map_error = "Check your song-section map: each row needs a section and start/end within your track."
+                        st.caption(section_map_error)
+                        section_ranges = []
+                        break
+                    section_ranges.append(row)
         for rights in result.input.analysis_scope:
             path = getattr(result, rights).model_copy(deep=True)
             with st.container(border=False):
@@ -863,10 +1067,24 @@ def render_review():
                     st.subheader(
                         "Your recording sample"
                         if rights == "master"
-                        else "Your replayed melody / lyrics"
+                        else "Check for replayed music"
                     )
                 key = f"review_{rights}_"
                 with st.container(key=f"stage_2_{rights}_status"):
+                    if rights == "publishing":
+                        st.radio(
+                            "Did you replay a melody or re-sing lyrics yourself?",
+                            [
+                                "I’m not sure yet",
+                                "No — I used the recording only",
+                                "Yes — I replayed or re-sang a part",
+                            ],
+                            key="replay_choice",
+                            on_change=replay_answer,
+                        )
+                        st.caption(
+                            "A recording sample may still involve songwriting rights. This question only asks whether you made a separate replay or vocal performance."
+                        )
                     status = st.selectbox(
                         "Have you checked this use?",
                         ["not_verified", "unknown", "candidate", "not_detected", "verified"],
@@ -917,21 +1135,24 @@ def render_review():
                         unsafe_allow_html=True,
                     )
                 with st.container(key=f"stage_2_{rights}_times"):
-                    st.markdown("### Check the moments")
+                    st.markdown("### Review the evidence")
                     st.caption(
-                        "Suggested moments carry straight into your document when you accept them. Listen first; you only need to edit if they are wrong."
+                        "Use the stem verdicts as supporting evidence, then listen and confirm or edit the paired timestamps."
                     )
                     if key + "seed_intervals" not in st.session_state:
                         st.session_state[key + "seed_intervals"] = suggested_intervals(
                             result, rights
                         )
                     seeds = st.session_state[key + "seed_intervals"]
+                    st.markdown("#### Check the moments")
+                    st.caption(
+                        "Suggested moments carry straight into your document when you accept them. Listen first; edit them if they are wrong."
+                    )
                     if rights == "master" and seeds:
                         paired = [
                             item
                             for item in seeds
-                            if item.original_start is not None
-                            and item.original_end is not None
+                            if item.original_start is not None and item.original_end is not None
                         ]
                         if paired:
                             st.info(
@@ -987,6 +1208,8 @@ def render_review():
                         num_rows="dynamic",
                         disabled=status == "not_detected" or not editable,
                         key=key + "intervals",
+                        on_change=edit_times,
+                        args=(rights,),
                         column_config={
                             c: st.column_config.NumberColumn(
                                 {
@@ -1019,6 +1242,7 @@ def render_review():
                         st.caption(
                             "No-use finding selected. Estimated times will not be included as sample use."
                         )
+                    current_times = []
                     try:
                         current_times = [
                             Interval(
@@ -1047,8 +1271,16 @@ def render_review():
                                 args=(rights, suggestion.kind),
                             )
                     st.caption(
-                        "A timing pattern cannot identify a melody or prove a loop. Suggestions are added only when you say yes."
+                        "Timing-based defaults are suggestions, not identified musical content. Check the proposed placement and repetition before finishing. Melody suggestions require your answer."
                     )
+                proposal = timing_prefills(
+                    st.session_state,
+                    key,
+                    current_times if status != "not_detected" else [],
+                    result.durations["new"],
+                    rights,
+                    section_ranges,
+                )
                 with st.container(key=f"stage_3_{rights}_sound"):
                     st.subheader("What did you use?")
                     st.caption("Describe the sound in your own words.")
@@ -1075,7 +1307,12 @@ def render_review():
                     )
                 with st.container(key=f"stage_4_{rights}_placement"):
                     st.subheader("Where does it fit?")
-                    st.caption("Tell us where the sample sits in your track.")
+                    st.caption("Suggested from your timestamps — check these before finishing.")
+                    st.caption(proposal.reason)
+                    if proposal.tentative_sections:
+                        st.caption(
+                            "Section names are provisional: timestamps alone cannot distinguish a chorus, verse or bridge."
+                        )
                     pitch = st.number_input(
                         "Did you pitch it up or down? (semitones, optional)",
                         value=0.0,
@@ -1086,8 +1323,10 @@ def render_review():
                     )
                     sections = st.multiselect(
                         "Which sections of your track?",
-                        ["intro", "verse", "chorus", "bridge", "outro"],
+                        ["whole track", "intro", "verse", "chorus", "bridge", "outro"],
                         key=key + "sections",
+                        on_change=update_section_placement,
+                        args=(rights,),
                     )
                     placement = st.selectbox(
                         "Where does it appear overall?",
@@ -1101,6 +1340,10 @@ def render_review():
                             "intro_outro_without_chorus": "Intro / outro, outside the chorus",
                             "verses": "Verses",
                             "one_time": "One appearance",
+                            "intro_only": "Intro only",
+                            "outro_only": "Outro only",
+                            "bridge_only": "Bridge only",
+                            "selected_sections": "Selected sections",
                         }[x],
                     )
                     confirmed = st.checkbox(
@@ -1217,6 +1460,8 @@ def render_review():
         candidate.review.corrected = None
         remaining = missing_document_inputs(candidate)
         step_errors = {2: [], 3: [], 4: []}
+        if section_map_error:
+            step_errors[4].append(section_map_error)
         for rights in result.input.analysis_scope:
             prefix = f"review_{rights}_"
             item = reviewed_paths.get(rights)

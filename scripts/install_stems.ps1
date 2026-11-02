@@ -16,5 +16,9 @@ Write-Host "Checking Demucs import..."
 & $Python -c "import demucs; print('Demucs import succeeded')"
 
 Write-Host ""
-Write-Host "Stem support is installed. Launch the test bench with:"
-Write-Host ".\.venv\Scripts\python.exe -m streamlit run dtw_test_app.py"
+Write-Host "Stem support is installed. Enable it in this PowerShell session with:"
+Write-Host '$env:LASTRADA_STEM_ENABLED = "1"'
+Write-Host "Then launch the main Lastrada website with:"
+Write-Host ".\.venv\Scripts\python.exe -m streamlit run app.py"
+Write-Host ""
+Write-Host "The first htdemucs_6s run downloads Demucs model weights."

@@ -171,7 +171,7 @@ def test_prefilled_times_require_confirmation_and_loop_answers_fill_only_blanks(
     by_label(app.radio, "Type of reuse").set_value("Master")
     by_label(app.button, "Find suggested moments").click().run()
     by_label(app.selectbox, "Have you checked this use?").set_value("verified").run()
-    assert len(app.dataframe[0].value) > 0
+    assert any(len(frame.value) > 0 for frame in app.dataframe)
     by_label(app.button, "Save draft").click().run()
     saved = app.session_state["analysis"].review.corrected["master"]["locate"]
     assert saved["detection_status"] == "candidate"
@@ -201,9 +201,9 @@ def test_seven_screen_navigation_keeps_musical_details():
         Path(__file__).resolve().parents[1] / "app.py", default_timeout=30
     ).run()
     by_label(app.button, "Start").click().run()
-    assert by_label(app.button, "Next: Track details →").disabled
+    assert by_label(app.button, "Find my sample →").disabled
     enable_demo(app)
-    by_label(app.button, "Next: Track details →").click().run()
+    by_label(app.button, "Find my sample →").click().run()
     assert app.session_state["workflow_tab"] == "2 · Track details"
     by_label(app.radio, "Type of reuse").set_value("Master")
     by_label(app.button, "Find suggested moments").click().run()
@@ -220,7 +220,7 @@ def test_seven_screen_navigation_keeps_musical_details():
     by_label(app.text_input, "What does it do in your track?").set_value("Drives groove").run()
     by_label(app.button, "Next: Place the sample →").click().run()
     assert app.session_state["workflow_tab"] == "5 · Place the sample"
-    by_label(app.multiselect, "Which sections of your track?").set_value(["verse"])
+    by_label(app.multiselect, "Which sections of your track?").set_value(["verse"]).run()
     by_label(app.selectbox, "Where does it appear overall?").set_value("verses")
     by_label(app.checkbox, "I’ve listened and checked these details").check().run()
     by_label(app.button, "Next: Review your draft →").click().run()
@@ -249,7 +249,7 @@ def test_landing_restart_clears_case_and_preserves_theme():
     by_label(app.toggle, "Dark mode").set_value(False).run()
     by_label(app.button, "Start").click().run()
     enable_demo(app)
-    by_label(app.button, "Next: Track details →").click().run()
+    by_label(app.button, "Find my sample →").click().run()
     assert "preview_analysis" in app.session_state
     by_label(app.button, "Find suggested moments").click().run()
     by_label(app.button, "New Sample").click().run()
@@ -259,7 +259,7 @@ def test_landing_restart_clears_case_and_preserves_theme():
     assert app.session_state["dark_mode"] is False
     assert any(t.value == "Your Music, Your Time." for t in app.title)
     by_label(app.button, "Start").click().run()
-    assert by_label(app.button, "Next: Track details →").disabled
+    assert by_label(app.button, "Find my sample →").disabled
 
 
 def test_times_acceptance_and_quality_gates():
@@ -325,7 +325,7 @@ def test_recording_sample_can_finish_without_replayed_music():
         app.text_input(key="review_master_" + field).set_value(value)
     app.run()
     by_label(app.button, "Next: Place the sample →").click().run()
-    app.multiselect(key="review_master_sections").set_value(["verse"])
+    app.multiselect(key="review_master_sections").set_value(["verse"]).run()
     app.selectbox(key="review_master_placement").set_value("verses")
     app.checkbox(key="review_master_checked").check().run()
     assert not by_label(app.button, "Next: Review your draft →").disabled
@@ -361,7 +361,7 @@ def test_reuse_analysis_and_media_without_work_on_hidden_screens(monkeypatch):
     ).run()
     by_label(app.button, "Start").click().run()
     enable_demo(app)
-    by_label(app.button, "Next: Track details →").click().run()
+    by_label(app.button, "Find my sample →").click().run()
     assert measure.call_count == 1
     by_label(app.radio, "Type of reuse").set_value("Master")
     by_label(app.button, "Find suggested moments").click().run()
@@ -414,3 +414,75 @@ def test_both_confirmed_can_describe_without_automatic_publishing_times():
     app.radio(key="review_publishing_agreement").set_value("Add times now").run()
     assert not app.checkbox(key="review_publishing_times_confirmed").disabled
     assert not app.exception
+
+
+def test_instruments_are_explicit_cached_and_do_not_revert_review(monkeypatch):
+    from unittest.mock import Mock
+    from lastrada import pipeline
+    from lastrada.schemas.models import Interval, StemEvidence
+
+    def probe(result, *_args):
+        updated = result.model_copy(deep=True)
+        updated.stem_evidence = [
+            StemEvidence(
+                candidate_number=1,
+                source_stem="bass",
+                new_song_stem="bass",
+                dtw_result="accepted",
+                interpretation="supporting evidence",
+                reason="test",
+            )
+        ]
+        updated.methods["stems"] = "test completed"
+        return updated
+
+    run = Mock(side_effect=probe)
+    monkeypatch.setattr(pipeline, "run_stem_probe", run)
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app.py", default_timeout=30
+    ).run()
+    by_label(app.button, "Start").click().run()
+    enable_demo(app)
+    by_label(app.button, "Find suggested moments").click().run()
+    assert not run.called
+    analysis = app.session_state["analysis"]
+    analysis.master.locate.sample_occurrences = [
+        Interval(
+            new_start=1,
+            new_end=3,
+            original_start=0,
+            original_end=2,
+            source="sampleid",
+            status="candidate",
+        )
+    ]
+    app.session_state["analysis"] = analysis
+    app.run()
+    assert not run.called
+    by_label(app.button, "Explore instruments").click().run()
+    assert run.call_count == 1
+    app.text_input(key="review_name").set_value("Creator")
+    app.text_area(key="review_narrative").set_value("My preserved draft")
+    by_label(app.button, "Save draft").click().run()
+    saved = app.session_state["analysis"].review.model_dump()
+    by_label(app.button, "Show saved instrument check").click().run()
+    assert run.call_count == 1
+    assert app.session_state["analysis"].review.model_dump() == saved
+    assert not app.exception
+
+
+def test_replay_question_skips_unneeded_path_and_prefills_keep_edits():
+    app = AppTest.from_file(
+        Path(__file__).resolve().parents[1] / "app.py", default_timeout=30
+    ).run()
+    by_label(app.button, "Start").click().run()
+    enable_demo(app)
+    by_label(app.button, "Find suggested moments").click().run()
+    app.radio(key="replay_choice").set_value("No — I used the recording only").run()
+    assert app.session_state["review_publishing_status"] == "not_detected"
+    assert app.session_state["review_publishing_checked"]
+    assert app.text_input(key="review_master_method").value == "Sampled the original recording"
+    app.text_input(key="review_master_method").set_value("My own method").run()
+    app.run()
+    assert app.text_input(key="review_master_method").value == "My own method"
+    assert not app.session_state.get("review_master_checked")

@@ -22,15 +22,15 @@ Use repository `tankr98/Lastrada`, branch `feat/lastrada-v0`, entrypoint `app.py
 
 The landing page introduces **Your Music, Your Time.** with a centered Start button. **New Sample** is available on every screen and clears the case, uploads and edits while preserving the theme. The workspace opens in navy dark mode with a light-mode toggle, progress at the top and a compact collapsible sidebar. Each screen focuses on one task, with compact buttons and a subtle transition that respects reduced-motion preferences.
 
-1. **Add your tracks:** upload the original and your new recording.
-2. **Track details:** title and artist prefill from recognizable filenames (`Title by Artist` or conventional `Artist - Title`), remain editable, and preserve creator corrections. See the preliminary PF-NMF sound-overlap finding, enter titles and artists, then confirm recording samples, replayed music or both. PF-NMF cannot determine the rights type; the creator’s choice carries forward.
-3. **Listen & check:** play both tracks and edit the suggested timestamps. If a reuse type does not apply, choose “I didn’t replay or re-sing anything” or “I didn’t use the original recording”; its timestamps and musical details are skipped. Two spectral views appear after analysis with zoom and hover markers. Tooltips show both track ranges when original positions are available; PF-NMF-only suggestions explicitly leave source positions unknown. Technical details are optional.
-4. **Describe the sound:** name what you used, how you used it, repetition and its musical role.
-5. **Place the sample:** name song sections, overall placement and any known pitch change.
+1. **Add your tracks:** upload the original and your new recording, then select **Find my sample**. Recognized titles/artists allow a direct jump to the analysis and timestamps.
+2. **Track details:** title and artist prefill from recognizable filenames (`Title by Artist` or conventional `Artist - Title`), remain editable, and preserve creator corrections. This screen is needed only when credits are missing or you want to change them. **Check both types — recommended** is the default; you do not need rights terminology before starting.
+3. **Listen & check:** play both tracks and accept or edit the suggested timestamps. Answer whether you separately replayed a melody or re-sang lyrics; answering no skips that table. If a reuse type does not apply, choose “I didn’t replay or re-sing anything” or “I didn’t use the original recording”; its timestamps and musical details are skipped. Two spectral views appear after analysis with zoom and hover markers. Tooltips show both track ranges when original positions are available; PF-NMF-only suggestions explicitly leave source positions unknown. Technical details are optional.
+4. **Describe the sound:** review the suggested reuse method and repetition, then name the sound and its musical role.
+5. **Place the sample:** review timestamp-based placement/section suggestions. An optional song-section map matches your named verse, chorus or bridge ranges to sample times for both paths.
 6. **Review your draft:** generate and edit the Nature of Use text, add your name and save or mark it as reviewed.
 7. **Your Nature of Use:** preview and download HTML or text. When placement is “throughout,” the document describes that placement without listing every occurrence; detailed times remain in the supporting JSON. HTML can be printed to PDF; supporting JSON is optional.
 
-Estimated master-analysis times populate a read-only table. Accept them to carry their exact values into the review, or choose **No, let me edit** to unlock corrections; publishing never inherits them. Timing patterns prompt questions about recurring use, melody and short loops. Only a creator-confirmed answer fills musical details, without replacing existing edits. Suggested times need a separate listening confirmation.
+Estimated master-analysis times populate a read-only table. Accept them to carry their exact values into the review, or choose **No, let me edit** to unlock corrections; publishing never inherits them. Timing patterns prompt questions about recurring use, melody and short loops. Timestamp rules prefill editable method, repetition and placement/section suggestions without replacing creator edits. They do not confirm evidence or identify verse versus chorus from timing alone; see [timing rules](docs/TIMING_PREFILLS.md). Suggested times need a separate listening confirmation.
 
 **Back** and **Next** preserve session inputs; the final Next saves the review draft. Marking a document as reviewed requires confirmed findings, checked details and a reviewer name. Confirming each applicable type of use unlocks the description step. Timestamp checks may be completed on Listen & check or Place the sample; missing or unconfirmed times block final review. Each Next button requires the relevant musical details. Document generation and the final screen require complete musical inputs, confirmed details, a description and the reviewer’s name. In-progress edits can be saved as a session draft. Recording reuse and compositional reuse stay separate.
 
@@ -70,3 +70,15 @@ Client documents, historical workbooks, commercial recordings, checkpoints, cach
 ### Interaction performance
 
 Review controls use a Streamlit fragment so ordinary entries do not rebuild playback or spectral charts. Audio bytes and spectral views are retained within the private session; charts refresh when their evidence or theme changes and render only on the listening screen. Downloads render on the final screen. Small input widgets stay mounted to preserve backtracking edits. Confirming credits reuses the preliminary analysis when the upload identities, demonstration mode and settings are unchanged; enabling optional matching runs its analysis separately. New Sample clears these session assets.
+
+### Lighter optional instrument check
+
+The main analysis never runs Demucs automatically. **Explore instruments** runs
+only on request, after a paired source/new-track candidate exists. It selects
+one strongest pair, caps each probe at eight seconds plus one-second margins,
+and uses `htdemucs` (four stems), four-second processing segments and one CPU
+thread per worker. A process-wide lock permits only one main analysis or instrument request at a
+time. Complete probe results are reused in the session and separated audio is
+cached on disk; a cache hit does not restore an older review. The extra probe
+never replaces the complete main-analysis timestamps. Sony/full-mix DTW evidence
+and final review requirements remain unchanged.

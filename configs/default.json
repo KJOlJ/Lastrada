@@ -13,7 +13,14 @@
   "dtw_enabled": true,
   "dtw_search_padding_seconds": 4.0,
   "dtw_max_pitch_shift_semitones": 6,
-  "dtw_min_duration_ratio": 0.5,
-  "dtw_max_duration_ratio": 1.5,
-  "dtw_minimum_duration_seconds": 0.5
+  "dtw_min_duration_ratio": 0.1,
+  "dtw_max_duration_ratio": 10.0,
+  "dtw_minimum_duration_seconds": 0.5,
+  "stem_enabled": false,
+  "stem_model_name": "htdemucs",
+  "stem_device": "cpu",
+  "stem_max_candidates": 1,
+  "stem_separation_padding_seconds": 1.0,
+  "stem_include_cross_other": false,
+  "stem_probe_seconds": 8.0
 }

@@ -19,7 +19,15 @@ def classify(percent, intervals, sections=(), expert=False):
         reason = "Experimental throughout proposal from >=95% temporal coverage."
     elif expert and sections:
         labels = set(sections)
-        if labels == {"chorus"}:
+        if labels == {"whole track"}:
+            placement = Placement.THROUGHOUT
+        elif labels == {"intro"}:
+            placement = Placement.INTRO
+        elif labels == {"outro"}:
+            placement = Placement.OUTRO
+        elif labels == {"bridge"}:
+            placement = Placement.BRIDGE
+        elif labels == {"chorus"}:
             placement = Placement.CHORUS
         elif (
             labels <= {"intro", "outro", "chorus"}
@@ -31,7 +39,9 @@ def classify(percent, intervals, sections=(), expert=False):
             placement = Placement.INTRO_OUTRO
         elif labels == {"verse"}:
             placement = Placement.VERSES
-        reason = "Proposed from expert-supplied section labels; verify final six-class choice."
+        elif labels <= {"intro", "verse", "chorus", "bridge", "outro"}:
+            placement = Placement.SELECTED
+        reason = "Proposed from expert-supplied section labels; verify the final placement choice."
     return Classification(
         placement=placement,
         coverage_category=category,

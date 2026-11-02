@@ -7,6 +7,7 @@ from lastrada.alignment import stems as stem_alignment
 from lastrada.alignment.stems import candidate_stem_pairs, compare_candidate_stems
 from lastrada.audio.io import Audio
 from lastrada.schemas.models import Interval
+from lastrada.separation import demucs as demucs_module
 from lastrada.separation.demucs import SeparatedRegion
 
 
@@ -28,6 +29,18 @@ def test_candidate_pairs_prioritize_matching_labels_and_selected_cross_pairs():
     ]
     assert ("guitar", "other") in pairs
     assert ("other", "guitar") in pairs
+
+
+def test_demucs_segment_is_normalized_for_integer_only_cli(monkeypatch, tmp_path):
+    monkeypatch.setattr(demucs_module, "demucs_available", lambda: True)
+
+    separator = demucs_module.DemucsSeparator(
+        cache_dir=tmp_path,
+        segment_seconds=7.5,
+    )
+
+    assert separator.segment_seconds == 7
+    assert isinstance(separator.segment_seconds, int)
 
 
 def test_stem_comparison_maps_local_alignment_back_to_song_time(monkeypatch, tmp_path):

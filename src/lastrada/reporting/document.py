@@ -130,7 +130,11 @@ def creator_narrative(analysis):
         path = getattr(analysis, rights)
         name = "the original recording" if rights == "master" else "the original composition"
         if path.locate.detection_status == "not_detected":
-            parts.append(f"No reuse of {name} was identified in this listening check.")
+            parts.append(
+                "No separate replayed melody or re-sung lyrics were identified in this listening check."
+                if rights == "publishing"
+                else f"No reuse of {name} was identified in this listening check."
+            )
             continue
         if path.locate.detection_status != "verified":
             parts.append(
@@ -157,7 +161,7 @@ def creator_narrative(analysis):
                 for i in path.locate.sample_occurrences
             )
             parts.append(f"It can be heard at {ranges} in the new track.")
-        if path.describe.sections:
+        if path.describe.sections and path.describe.sections != ["whole track"]:
             parts.append("It appears in the " + ", ".join(path.describe.sections) + " sections.")
         if path.describe.repetition:
             parts.append(f"Repetition: {path.describe.repetition}.")

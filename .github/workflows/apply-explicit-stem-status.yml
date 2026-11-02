@@ -1,0 +1,126 @@
+name: Apply explicit Demucs status
+
+on:
+  push:
+    branches: [feat/stem-assisted-main-flow]
+    paths:
+      - .github/workflows/apply-explicit-stem-status.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/stem-assisted-main-flow
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch reviewer-facing stem status
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(
+                      f"Expected one match in {path}, found {count}: {old[:80]!r}"
+                  )
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          app = Path("app.py")
+          helper = '''def _render_stem_runtime_status(result):
+              method = result.methods.get("stems", "")
+              evidence = list(getattr(result, "stem_evidence", []))
+              if evidence:
+                  counts = {
+                      verdict: sum(item.dtw_result == verdict for item in evidence)
+                      for verdict in ("accepted", "weak", "rejected")
+                  }
+                  st.success(
+                      "Demucs stem separation completed for the strongest paired "
+                      "candidate region(s). Stem-pair DTW produced "
+                      f"{counts['accepted']} accepted, {counts['weak']} weak, and "
+                      f"{counts['rejected']} rejected verdict(s)."
+                  )
+                  st.caption(
+                      "The detailed Source stem ↔ New-song stem verdict table appears "
+                      "below under Review the evidence."
+                  )
+              elif method.startswith("unavailable:"):
+                  reason = method.removeprefix("unavailable:").strip()
+                  st.warning(
+                      "Demucs stem separation was requested but unavailable for this "
+                      "run. Reason: " + (reason or "unknown setup error")
+                  )
+              elif method.startswith("not_run: optional stem assistance disabled"):
+                  st.info(
+                      "Demucs stem separation was not enabled for this analysis. Set "
+                      "LASTRADA_STEM_ENABLED=1 before launching Streamlit, then start "
+                      "a New Sample."
+                  )
+              elif method.startswith("not_run:"):
+                  st.info(
+                      "Demucs stem separation did not run for this analysis: "
+                      + method.removeprefix("not_run:").strip()
+                  )
+              elif method:
+                  st.info("Demucs stem status: " + method)
+
+
+          '''
+          replace_once(app, "st.set_page_config(\n", helper + "st.set_page_config(\n")
+
+          caption_end = '''                                + (f" · pipeline: {alignment_method}" if alignment_method else "")
+                              )
+          '''
+          replace_once(
+              app,
+              caption_end,
+              caption_end + "                            _render_stem_runtime_status(result)\n",
+          )
+
+          pipeline = Path("src/lastrada/pipeline.py")
+          replace_once(
+              pipeline,
+              '''        if refined_candidates:
+                      current = result.methods.get("alignment", "")
+                      result.methods["alignment"] = (
+                          current + "_then_stem_assisted_dtw" if current else "stem_assisted_dtw"
+                      )
+          ''',
+              '''        current = result.methods.get("alignment", "")
+                  stem_stage = (
+                      "stem_assisted_dtw"
+                      if refined_candidates
+                      else "stem_assisted_evidence"
+                  )
+                  result.methods["alignment"] = (
+                      current + "_then_" + stem_stage if current else stem_stage
+                  )
+          ''',
+          )
+
+          print("Patched explicit Demucs runtime status and alignment provenance.")
+          PY
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.lock && python -m pip install --no-deps -e .
+      - name: Validate
+        run: |
+          ruff check .
+          pytest -q
+          python scripts/synthetic_smoke.py
+      - name: Commit patched files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py src/lastrada/pipeline.py
+          git diff --cached --quiet && exit 0
+          git commit -m "Show explicit Demucs status in the main review flow"
+          git push origin HEAD:feat/stem-assisted-main-flow
