@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: firebase-hosting-production
+  group: firebase-hosting-lastrada-alt
   cancel-in-progress: false
 
 jobs:
@@ -44,15 +44,38 @@ jobs:
             exit 1
           fi
 
-      - name: Preserve the live Firebase and Cloud Run configuration
+      - name: Build configuration for the new Firebase app
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 4 \
             "https://lastrada-64bab.web.app/config.json" \
-            --output web/public/config.json
+            --output /tmp/current-live-config.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path('/tmp/current-live-config.json').read_text())
+          api_base = source.get('apiBase')
+          if not api_base or not str(api_base).startswith('https://'):
+              raise SystemExit('The existing live config did not contain a valid Cloud Run apiBase')
+
+          config = {
+              'firebase': {
+                  'apiKey': 'AIzaSyBoxFP_8MOTkkoFGO2DOz9Mw39VhzA_2F4',
+                  'authDomain': 'lastrada-64bab.firebaseapp.com',
+                  'projectId': 'lastrada-64bab',
+                  'storageBucket': 'lastrada-64bab.firebasestorage.app',
+                  'messagingSenderId': '471058014767',
+                  'appId': '1:471058014767:web:9b99b922f532c81db5dcda',
+                  'measurementId': 'G-727C6WV31X',
+              },
+              'apiBase': api_base,
+          }
+          Path('web/public/config.json').write_text(json.dumps(config, indent=2) + '\n')
+          PY
           python -m json.tool web/public/config.json >/dev/null
 
-      - name: Deploy Hosting only
+      - name: Deploy Hosting to lastrada-alt
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           AUTH_MODE: ${{ steps.auth.outputs.mode }}
@@ -73,16 +96,20 @@ jobs:
               --non-interactive
           fi
 
-      - name: Verify grouped timestamp assets are live
+      - name: Verify the new Firebase site
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 5 --retry-delay 3 \
-            "https://lastrada-64bab.web.app/grouped-timestamps.js?revision=${GITHUB_SHA}" \
+            "https://lastrada-alt.web.app/grouped-timestamps.js?revision=${GITHUB_SHA}" \
             --output /tmp/grouped-timestamps.js
-          grep -q "Grouped use pattern" /tmp/grouped-timestamps.js
+          grep -q "Matched derivative timestamps" /tmp/grouped-timestamps.js
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+            "https://lastrada-alt.web.app/config.json?revision=${GITHUB_SHA}" \
+            --output /tmp/config.json
+          grep -q '1:471058014767:web:9b99b922f532c81db5dcda' /tmp/config.json
           {
             echo "### Firebase Hosting deployed"
-            echo "https://lastrada-64bab.web.app"
+            echo "https://lastrada-alt.web.app"
             echo ""
-            echo "Backend services were not changed."
+            echo "Sony, DTW, Demucs, Cloud Run and stored analysis behavior were not changed."
           } >> "${GITHUB_STEP_SUMMARY}"
