@@ -1,0 +1,35 @@
+.automaticInstrumentControls button[data-action="stems"],
+.automaticInstrumentControls button:disabled {
+  display: none !important;
+}
+
+.automaticInstrumentStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 9px 0 4px !important;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.automaticInstrumentStatus::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #69a8ff;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #69a8ff 18%, transparent);
+}
+
+.automaticInstrumentControls > p[role="status"]:not(.automaticInstrumentStatus) {
+  margin-bottom: 4px;
+}
+
+@media print {
+  .automaticInstrumentControls {
+    display: none !important;
+  }
+}

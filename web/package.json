@@ -2,7 +2,7 @@
   "private": true,
   "name": "lastrada-firebase-web",
   "scripts": {
-    "test": "node ../tests/browser/firebase.cjs",
+    "test": "node ../tests/browser/grouped-timestamps.cjs && node ../tests/browser/relationship-evidence.cjs && node ../tests/browser/matched-stems-only.cjs && node ../tests/browser/relationship-layout.cjs && node ../tests/browser/automatic-instruments.cjs && node ../tests/browser/firebase.cjs",
     "test:instruments": "node ../tests/browser/instruments.cjs"
   },
   "devDependencies": {
