@@ -227,3 +227,22 @@ def test_repeated_source_description_is_shared_but_reuse_decisions_are_independe
     assert rows[1].new_sounds[0].instrument == "Drums"
     assert rows[1].suggested_instruments == []
     assert rows[0].source_sounds[0] is not rows[1].source_sounds[0]
+
+
+def test_resuming_an_earlier_row_preserves_the_saved_source_description():
+    from lastrada.schemas.models import InstrumentPresence
+
+    rows = instruments.occurrence_rows(sample())[:2]
+    rows[1].interval.original_start, rows[1].interval.original_end = 0, 4
+    rows[1].status = "checked"
+    rows[1].source_sounds = [
+        InstrumentPresence(instrument="Bass", energy_share=0.8, scope="sample", start=0, end=4)
+    ]
+    canonical = {}
+    instruments.stabilize_source_descriptions(rows, canonical)
+    rows[0].status = "checked"
+    rows[0].source_sounds = [
+        InstrumentPresence(instrument="Guitar", energy_share=0.8, scope="sample", start=0, end=4)
+    ]
+    instruments.stabilize_source_descriptions(rows, canonical)
+    assert all(r.source_sounds[0].instrument == "Bass" for r in rows)

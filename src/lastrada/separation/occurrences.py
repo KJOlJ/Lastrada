@@ -84,13 +84,14 @@ def instrument_prefill(result, model_name=None):
     return {"element": ", ".join(labels), "method": "Sampled the original recording"}
 
 
-def stabilize_source_descriptions(rows):
+def stabilize_source_descriptions(rows, descriptions=None):
     """Share only source presence for identical source times and model versions.
 
     Different new mixes keep their own estimates and alignment decisions. Nearby
     or overlapping source passages are deliberately not treated as identical.
     """
-    descriptions = {}
+    if descriptions is None:
+        descriptions = {}
     for row in rows:
         if row.status != "checked" or not row.source_sounds:
             continue
@@ -125,9 +126,10 @@ def run_occurrence_instruments(
     updated.instrument_occurrences = occurrence_rows(updated, settings.stem_model_name)
     began = monotonic()
     count = 0
+    source_descriptions = {}
 
     def persist():
-        stabilize_source_descriptions(updated.instrument_occurrences)
+        stabilize_source_descriptions(updated.instrument_occurrences, source_descriptions)
         updated.methods["instruments"] = f"demucs_{settings.stem_model_name}_per_occurrence_v2"
         updated.timings_seconds["instrument_checks"] = monotonic() - began
         if on_progress:
