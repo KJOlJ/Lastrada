@@ -3,8 +3,8 @@ let scheduled = false;
 function acceptedResult(item) {
   const result = item.querySelector(".dtwResult");
   if (!result?.classList.contains("accepted")) return false;
-  if (result.textContent !== "Matched") result.textContent = "Matched";
-  result.setAttribute("aria-label", "Matched stem comparison");
+  if (result.textContent !== "Supporting evidence") result.textContent = "Supporting evidence";
+  result.setAttribute("aria-label", "Supporting stem comparison");
   return true;
 }
 

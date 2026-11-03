@@ -85,6 +85,17 @@ const { pathToFileURL } = require("url");
   ]);
   assert.strictEqual(pending.checkedCount, 0);
   assert.strictEqual(pending.pending, 1);
+  rows[1].evidence[0].dtw_result = "rejected";
+  rows[1].evidence[0].duration_ratio = 8;
+  const mixed = module.summarizeRelationshipEvidence(family, rows).entries[0];
+  assert.strictEqual(mixed.momentCount, 1);
+  assert.strictEqual(mixed.checkedMomentCount, 2);
+  assert.strictEqual(mixed.durationRatio, 1.04);
+  rows[0].context_only = true;
+  assert(!module.summarizeRelationshipEvidence(family, rows).entries.some(e => e.result === "accepted"));
+  rows[1].evidence = [];
+  assert.strictEqual(module.summarizeRelationshipEvidence(family, rows).entries.length, 0,
+    "A suggested label must never fabricate an accepted comparison");
   console.log("Relationship evidence tests passed");
 })().catch((error) => {
   console.error(error);

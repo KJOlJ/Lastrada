@@ -228,3 +228,22 @@ body.light .dtwResult.rejected {
     break-inside: avoid;
   }
 }
+
+.instrumentPresence {
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 12px;
+}
+.instrumentPresence > div {
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+.instrumentPresence small {
+  display: block;
+  color: var(--muted);
+}
+.dtwResult {
+  flex-shrink: 1;
+  white-space: normal;
+}

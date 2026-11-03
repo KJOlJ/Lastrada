@@ -253,7 +253,8 @@ function soundLabel(interval) {
   const row = instrumentRow(interval);
   if (!row) return "Not checked for these times";
   if (row.status === "checked")
-    return row.suggested_instruments?.join(", ") || "No reliable match";
+    return row.suggested_instruments?.join(", ") ||
+      (row.source_sounds?.length ? `Source estimate: ${row.source_sounds.map(s => s.instrument + (s.scope === "context" ? " (context)" : "")).join(", ")}` : "No clear instrument estimate");
   return (
     {
       pending: "Not checked yet",
@@ -271,12 +272,7 @@ function currentInstrumentRows() {
         status:
           interval.original_start == null || interval.original_end == null
             ? "no_source"
-            : Math.min(
-                  interval.new_end - interval.new_start,
-                  interval.original_end - interval.original_start,
-                ) < 2
-              ? "too_short"
-              : "pending",
+            : "pending",
         suggested_instruments: [],
       },
   );
@@ -293,6 +289,9 @@ function formatTime(value) {
   const rounded = Math.round(value * 100);
   return `${Math.floor(rounded / 6000)}:${((rounded % 6000) / 100).toFixed(2).padStart(5, "0")}`;
 }
+function presenceLabels(sounds) {
+  return sounds?.length ? sounds.map(s => `${esc(s.instrument)} (${s.scope === "context" ? "context " : ""}${formatTime(s.start)}–${formatTime(s.end)})`).join(", ") : "No clear estimate";
+}
 function instrumentTable() {
   return `<div class="tableWrap instrumentTable"><table aria-label="Instrument comparison results"><thead><tr><th>Your track</th><th>Original</th><th>Estimated sound</th><th>Check</th></tr></thead><tbody>${(
     forms.master?.intervals || []
@@ -302,7 +301,7 @@ function instrumentTable() {
       const status = row?.status;
       const note =
         status === "checked"
-          ? row.suggested_instruments?.length
+          ? row.context_only ? "Context only; reuse unconfirmed" : row.suggested_instruments?.length
             ? "Possible supporting match"
             : "No supporting match"
           : status === "too_short"
@@ -313,7 +312,7 @@ function instrumentTable() {
                 ? "Try again"
                 : "Pending";
       const probe = row?.probe;
-      return `<tr><td>${formatTime(i.new_start)}–${formatTime(i.new_end)}</td><td>${i.original_start == null ? "Not located" : `${formatTime(i.original_start)}–${formatTime(i.original_end)}`}</td><td>${esc(soundLabel(i))}</td><td><span>${note}</span>${probe ? `<details><summary>Checked portion</summary><small>Your track: ${formatTime(probe.new_start)}–${formatTime(probe.new_end)}<br>Original: ${formatTime(probe.original_start)}–${formatTime(probe.original_end)}</small></details>` : ""}</td></tr>`;
+      return `<tr><td>${formatTime(i.new_start)}–${formatTime(i.new_end)}</td><td>${i.original_start == null ? "Not located" : `${formatTime(i.original_start)}–${formatTime(i.original_end)}`}</td><td>${esc(soundLabel(i))}${row?.source_sounds?.length || row?.new_sounds?.length ? `<details><summary>Estimated sounds in each mix</summary><small>Original: ${presenceLabels(row.source_sounds)}<br>Your track: ${presenceLabels(row.new_sounds)}<br>Stem estimates may contain bleed; presence alone does not establish reuse.</small></details>` : ""}</td><td><span>${note}</span>${probe ? `<details><summary>Checked portion</summary><small>Your track: ${formatTime(probe.new_start)}–${formatTime(probe.new_end)}<br>Original: ${formatTime(probe.original_start)}–${formatTime(probe.original_end)}</small></details>` : ""}</td></tr>`;
     })
     .join("")}</tbody></table></div>`;
 }
@@ -366,14 +365,14 @@ function renderInstruments() {
   const missingSource = rows.filter((row) => row.status === "no_source").length;
   const summary = `${checked} of ${rows.length} moments compared${tooShort ? `; ${tooShort} too short to assess` : ""}${missingSource ? `; ${missingSource} missing original times` : ""}.`;
   const header =
-    '<h2>Instruments at each moment</h2><p class="muted">The fast analysis checks up to three moments using six estimated stems: bass, drums, vocals, guitar, piano and other sounds. Request additional checks below to compare up to eight seconds of each remaining moment. “Other” remains unidentified; confirm instrument suggestions by listening.</p>';
+    '<h2>Instruments at each moment</h2><p class="muted">The fast analysis checks up to three moments using six estimated stems: bass, drums, vocals, guitar, piano and other sounds. Each check uses up to eight seconds; short clips also show estimated sounds from the sample or clearly marked surrounding context. “Other” remains unidentified; confirm instrument suggestions by listening.</p>';
   const table = instrumentTable();
   if (instrumentBusy)
     return `${header}<p role="status"><span class="spinner"></span> ${esc(instrumentMessage || "Starting the instrument check…")}</p><button disabled>Instrument check in progress</button>${table}`;
   if (!perMomentSupported)
     return `${header}<p class="warning">Per-moment instrument checks need the updated analysis service. The earlier single-region result cannot label every timestamp.</p>${table}`;
   const canRun = eligible && (pending || !rows.length);
-  return `${header}${failure ? `<p role="alert" class="warning">${esc(failure)}</p>` : ""}<p role="status">${summary} Suggested sounds prefill your description; confirm them by listening.</p>${instrumentMessage && !failure ? `<p>${esc(instrumentMessage)}</p>` : ""}${canRun ? button(failure ? "Try instrument check again" : checked ? "Continue instrument checks" : "Run instrument check", "stems") : checked ? '<p class="muted">Completed results are reused.</p>' : '<p class="muted">No eligible paired region of at least two seconds is available. You can still continue to your document.</p><button disabled>Instrument check unavailable</button>'}${table}`;
+  return `${header}${failure ? `<p role="alert" class="warning">${esc(failure)}</p>` : ""}<p role="status">${summary} Suggested sounds prefill your description; confirm them by listening.</p>${instrumentMessage && !failure ? `<p>${esc(instrumentMessage)}</p>` : ""}${canRun ? button(failure ? "Try instrument check again" : checked ? "Continue instrument checks" : "Run instrument check", "stems") : checked ? '<p class="muted">Completed results are reused.</p>' : '<p class="muted">No paired region with original timestamps is available. You can still continue to your document.</p><button disabled>Instrument check unavailable</button>'}${table}`;
 }
 function updateInstruments() {
   if ($("#instruments")) $("#instruments").innerHTML = renderInstruments();

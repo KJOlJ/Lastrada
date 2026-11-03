@@ -92,10 +92,20 @@ class StemEvidence(StrictModel):
     reason: str = Field(min_length=1)
     mean_dtw_cost: float | None = Field(default=None, ge=0)
     pitch_shift_semitones: int | None = None
+    scope: Literal["sample", "context"] = "sample"
+
+
+class InstrumentPresence(StrictModel):
+    instrument: str
+    energy_share: float = Field(ge=0, le=1)
+    scope: Literal["sample", "context"]
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
 
 
 class InstrumentOccurrence(StrictModel):
     model_name: str | None = None
+    evidence_version: int = 1
     occurrence_id: str
     candidate_number: int = Field(ge=1)
     interval: Interval
@@ -104,6 +114,9 @@ class InstrumentOccurrence(StrictModel):
     reason: str = "Not checked yet"
     evidence: list[StemEvidence] = Field(default_factory=list)
     suggested_instruments: list[str] = Field(default_factory=list)
+    context_only: bool = False
+    source_sounds: list[InstrumentPresence] = Field(default_factory=list)
+    new_sounds: list[InstrumentPresence] = Field(default_factory=list)
 
 
 class Locate(StrictModel):

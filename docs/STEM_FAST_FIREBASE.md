@@ -11,18 +11,31 @@ branch. The two analysis branches are distinct. This test does not deploy the
 Streamlit interface or use the separate `deploy/cloud-run` workflow, which has a
 public Streamlit service and a larger resource allocation.
 
+## Current evidence update
+
+See [INSTRUMENT_EVIDENCE.md](INSTRUMENT_EVIDENCE.md) for the current v2 behavior:
+short clips receive sample/context sound estimates, repeated source intervals
+share a source description, and DTW uses content and slope safeguards. The
+historical validation measurements below describe the earlier integration.
+
+The subsequently deployed grouped frontend is on `lastrada-alt.web.app` (Firebase
+web app `1:471058014767:web:9b99b922f532c81db5dcda`) and shares the API/worker with
+the original site. Its existing origins and daily limits must be preserved when
+updating the backend. The bootstrap commands below describe the original site
+setup; do not use them blindly to update the alt site or reset its configuration.
+
 ## Effective workflow
 
 - Firebase Hosting interface and verified Google sign-in remain in place.
 - Sony SampleID and guarded full-mix DTW run first. The six-stem `htdemucs_6s`
   model then compares the top three paired candidates, as in the fast profile.
   It can refine a coarse Sony timing; existing waveform/full-mix refinements
-  remain intact. This initial pass retains the branch's exploratory DTW rules.
+  remain intact. The current pass uses the v2 content and slope safeguards.
 - Those three comparisons are associated with their own timestamps. Instrument
   prefills exclude full-mix matches, cross-label spillover, moments under two
   seconds and extreme duration ratios. Guitar and piano estimates are available;
   no model suggestion is automatically expert-verified.
-- Other eligible moments can be checked explicitly in bounded batches (up to
+- Remaining moments, including short clips, are checked by the grouped interface in bounded batches (up to
   ten minutes, fifty comparisons, eight seconds per recording per probe). These
   additional checks retain the stricter 0.5–2x ratios and ±2-semitone search.
 - Repeated source passages are summarized as loop groups without deleting raw

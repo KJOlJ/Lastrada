@@ -3,6 +3,7 @@ const { spawnSync } = require("child_process");
 const path = require("path");
 for (const scenario of [
   "success",
+  "short_context",
   "worker_failure",
   "download_failure",
   "quota",

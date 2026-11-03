@@ -24,14 +24,13 @@ class Settings(StrictModel):
     sampleid_batch_size: int = Field(default=4, ge=1, le=16)
 
     # Optional DTW refinement applied only after SampleID proposes a candidate.
-    # The 0.1x-10x range is intentionally permissive for exploratory testing and
-    # materially increases the chance of false alignments, so every result still
-    # requires listening review.
+    # Conservative duration bounds complement slope/content checks. Existing
+    # configs can still load older values, but cannot remove the path safeguards.
     dtw_enabled: bool = True
     dtw_search_padding_seconds: float = Field(default=4.0, ge=0.0, le=30.0)
     dtw_max_pitch_shift_semitones: int = Field(default=6, ge=0, le=12)
-    dtw_min_duration_ratio: float = Field(default=0.1, gt=0, le=1.0)
-    dtw_max_duration_ratio: float = Field(default=10.0, ge=1.0, le=10.0)
+    dtw_min_duration_ratio: float = Field(default=0.5, gt=0, le=1.0)
+    dtw_max_duration_ratio: float = Field(default=2.0, ge=1.0, le=10.0)
     dtw_minimum_duration_seconds: float = Field(default=0.5, gt=0, le=10.0)
 
     # Opt-in candidate validation. Main UI uses one bounded probe after analysis;

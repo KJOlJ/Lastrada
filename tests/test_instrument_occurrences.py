@@ -65,7 +65,7 @@ def test_each_moment_keeps_own_evidence_and_resumes_without_reprocessing(monkeyp
     assert [r.status for r in first.instrument_occurrences] == [
         "checked",
         "pending",
-        "too_short",
+        "pending",
         "no_source",
     ]
     assert first.instrument_occurrences[0].suggested_instruments == ["Bass"]
@@ -74,7 +74,7 @@ def test_each_moment_keeps_own_evidence_and_resumes_without_reprocessing(monkeyp
     second = instruments.run_occurrence_instruments(
         first, None, None, Settings(), separator=SimpleNamespace()
     )
-    assert calls == [0, 10]
+    assert calls == [0, 10, 18.5]
     assert second.instrument_occurrences[1].suggested_instruments == ["Drums"]
     assert instruments.instrument_check_complete(second)
     assert instruments.instrument_prefill(second)["element"] == "Bass, Drums"
@@ -86,7 +86,7 @@ def test_each_moment_keeps_own_evidence_and_resumes_without_reprocessing(monkeyp
     instruments.run_occurrence_instruments(
         second, None, None, Settings(), separator=SimpleNamespace()
     )
-    assert calls == [0, 10]
+    assert calls == [0, 10, 18.5]
     # Edited timing gets a new identity and cannot inherit an instrument label.
     second.master.locate.sample_occurrences[0].new_end = 3
     assert instruments.occurrence_rows(second)[0].status == "pending"
@@ -138,6 +138,92 @@ def test_zero_budget_and_unknown_sources_do_not_load_demucs(monkeypatch):
     assert [r.status for r in result.instrument_occurrences] == [
         "pending",
         "pending",
-        "too_short",
+        "pending",
         "no_source",
     ]
+
+
+def test_old_short_and_checked_results_are_rechecked_under_new_evidence_rules():
+    result = sample()
+    result.instrument_occurrences = instruments.occurrence_rows(result, "htdemucs_6s")
+    for row in result.instrument_occurrences:
+        row.evidence_version = 1
+        row.status = "too_short"
+        row.suggested_instruments = ["Bass"]
+    rows = instruments.occurrence_rows(result, "htdemucs_6s")
+    assert [r.status for r in rows] == ["pending", "pending", "pending", "no_source"]
+    assert all(not r.suggested_instruments for r in rows)
+    assert instruments.instrument_prefill(result, "htdemucs_6s") == {}
+
+
+def test_short_probe_describes_actual_audio_without_claiming_context_is_sampled(monkeypatch):
+    import numpy as np
+    from lastrada.audio.io import Audio
+    from lastrada.separation.presence import describe_region
+
+    result = sample()
+    result.master.locate.sample_occurrences = result.master.locate.sample_occurrences[2:3]
+    sr = 1000
+
+    def region(stem, offset):
+        y = np.ones(6 * sr, dtype=np.float32)
+        return SimpleNamespace(
+            offset_seconds=offset,
+            crop_duration=6,
+            candidate_start_local=1,
+            candidate_end_local=5,
+            stems={
+                "full_mix": Audio(y, sr, 6),
+                stem: Audio(y, sr, 6),
+                "vocals": Audio(y * 0.001, sr, 6),
+            },
+        )
+
+    source, target = region("bass", 0), region("drums", 17.5)
+
+    def compare(*args, **kwargs):
+        return SimpleNamespace(
+            evidence=[evidence("bass")], source_region=source, derivative_region=target
+        )
+
+    monkeypatch.setattr(instruments, "compare_candidate_stems", compare)
+    updated = instruments.run_occurrence_instruments(
+        result, None, None, Settings(), separator=SimpleNamespace()
+    )
+    row = updated.instrument_occurrences[0]
+    assert row.context_only and row.status == "checked"
+    assert all(e.scope == "context" for e in row.evidence)
+    assert row.source_sounds[0].instrument == "Bass"
+    assert row.new_sounds[0].instrument == "Drums"
+    assert row.new_sounds[0].start == 20 and row.new_sounds[0].end == 21
+    assert row.new_sounds[0].scope == "sample"
+    assert row.suggested_instruments == [] and instruments.instrument_prefill(updated) == {}
+    assert updated.master == result.master
+    tiny = describe_region(source, 2, 2.1)
+    assert tiny[0].scope == "context" and tiny[0].start == 1 and tiny[0].end == 5
+    assert [p.instrument for p in tiny] == ["Bass"]  # Suppress quiet bleed.
+    assert tiny == describe_region(source, 2, 2.1)  # Stable repeated source crop.
+
+
+def test_repeated_source_description_is_shared_but_reuse_decisions_are_independent():
+    from lastrada.schemas.models import InstrumentPresence
+
+    rows = instruments.occurrence_rows(sample())[:2]
+    for row in rows:
+        row.status = "checked"
+        row.interval.original_start, row.interval.original_end = 0, 4
+
+    def presence(label):
+        return [
+            InstrumentPresence(instrument=label, energy_share=0.8, scope="sample", start=0, end=4)
+        ]
+
+    rows[0].source_sounds = presence("Bass")
+    rows[1].source_sounds = presence("Guitar")
+    rows[1].new_sounds = presence("Drums")
+    rows[0].suggested_instruments = ["Bass"]
+    instruments.stabilize_source_descriptions(rows)
+    assert rows[0].source_sounds == rows[1].source_sounds
+    assert rows[1].new_sounds[0].instrument == "Drums"
+    assert rows[1].suggested_instruments == []
+    assert rows[0].source_sounds[0] is not rows[1].source_sounds[0]

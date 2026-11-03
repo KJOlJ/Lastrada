@@ -43,6 +43,10 @@ function python(mode, body) {
       source: "sampleid_rank_sequence",
       status: "candidate",
     };
+    if (instrumentScenario === "short_context") {
+      interval.new_end = 1.4;
+      interval.original_end = 2.4;
+    }
     data.analysis.master.locate.sample_occurrences = [interval];
     data.suggestions.master.intervals = [interval];
     data.instrument_rows = [
@@ -286,6 +290,13 @@ function python(mode, body) {
                   probe: { ...data.instrument_rows[1].interval },
                 };
               }
+              if (instrumentScenario === "short_context") {
+                const row = data.instrument_rows[0];
+                row.context_only = true;
+                row.suggested_instruments = [];
+                row.source_sounds = [{ instrument: "Bass", energy_share: 0.7, scope: "sample", start: 2, end: 2.4 }];
+                row.new_sounds = [{ instrument: "Drums", energy_share: 0.8, scope: "sample", start: 1, end: 1.4 }];
+              }
               data.analysis.instrument_occurrences = data.instrument_rows;
             }
           }
@@ -372,7 +383,7 @@ function python(mode, body) {
         throw Error(
           "Missing source times should explain why instruments cannot run",
         );
-      await p.getByText(/No eligible paired region/).waitFor();
+      await p.getByText(/No paired region with original timestamps/).waitFor();
     } else if (instrumentScenario) {
       await p
         .getByRole("button", { name: "Run instrument check", exact: true })
@@ -421,13 +432,24 @@ function python(mode, body) {
             .waitFor();
           await p
             .getByText(
-              instrumentScenario === "no_match"
+              instrumentScenario === "short_context"
+                ? "Context only; reuse unconfirmed"
+                : instrumentScenario === "no_match"
                 ? "No supporting match"
                 : "Possible supporting match",
               { exact: true },
             )
             .first()
             .waitFor();
+          if (instrumentScenario === "short_context") {
+            const presence = p.locator("[data-stem-dtw-evidence] .instrumentPresence");
+            await presence.locator("summary").click();
+            const text = await presence.innerText();
+            if (!text.includes("Original: Bass") || !text.includes("New mix: Drums"))
+              throw Error("Short-clip source and new-mix estimates were lost or conflated");
+            if (await p.locator("[data-stem-dtw-evidence] .dtwResult.accepted").count())
+              throw Error("Context-only match shown as support for the tiny interval");
+          }
           if (instrumentScenario === "success") {
             const rows = p
               .getByRole("table", { name: "Instrument comparison results" })
@@ -506,6 +528,11 @@ function python(mode, body) {
     }
     if (process.env.LASTRADA_BROWSER_OUTPUT) {
       fs.mkdirSync(process.env.LASTRADA_BROWSER_OUTPUT, { recursive: true });
+      const presence = p.locator("[data-stem-dtw-evidence] .instrumentPresence").first();
+      if (await presence.count()) {
+        await presence.locator("summary").click();
+        await master.screenshot({ path: path.join(process.env.LASTRADA_BROWSER_OUTPUT, "source-and-new-instruments.png") });
+      }
       await p.locator("#instruments").screenshot({
         path: path.join(
           process.env.LASTRADA_BROWSER_OUTPUT,
@@ -524,6 +551,8 @@ function python(mode, body) {
       )
         throw Error("Timestamp instruments did not prefill the sound");
     }
+    if (instrumentScenario === "short_context" && await p.getByLabel("What did you take?", { exact: true }).inputValue())
+      throw Error("Context-only evidence must not prefill a sampled instrument");
     await p
       .getByLabel("What did you take?", { exact: true })
       .fill("A bassline");

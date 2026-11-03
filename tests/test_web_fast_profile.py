@@ -62,7 +62,7 @@ def test_web_profile_preserves_fast_six_stem_top_three_configuration():
     assert s.stem_enabled and s.stem_model_name == "htdemucs_6s"
     assert s.stem_max_candidates == 3 and s.stem_device == "cpu"
     assert s.stem_include_cross_other and s.stem_separation_padding_seconds == 4
-    assert (s.dtw_min_duration_ratio, s.dtw_max_duration_ratio) == (0.1, 10)
+    assert (s.dtw_min_duration_ratio, s.dtw_max_duration_ratio) == (0.5, 2)
     assert s.stem_timeout_seconds <= 180
 
 

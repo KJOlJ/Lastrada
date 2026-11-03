@@ -1,21 +1,7 @@
 import { groupIntervals } from "./grouped-timestamps.js";
 
-const EPSILON = 1e-9;
 let latestInstrumentRows = [];
 let scheduled = false;
-
-function duration(start, end) {
-  return Math.max(0, Number(end) - Number(start));
-}
-
-function overlapRatio(aStart, aEnd, bStart, bEnd) {
-  if (![aStart, aEnd, bStart, bEnd].every(Number.isFinite)) return 0;
-  const overlap = Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
-  return overlap / Math.max(
-    EPSILON,
-    Math.min(duration(aStart, aEnd), duration(bStart, bEnd)),
-  );
-}
 
 function median(values) {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
@@ -46,7 +32,7 @@ function titleCase(value) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function closeEnough(left, right, tolerance = 0.05) {
+function closeEnough(left, right, tolerance = 0.000001) {
   if (left == null && right == null) return true;
   return Number.isFinite(left) && Number.isFinite(right)
     ? Math.abs(left - right) <= tolerance
@@ -60,32 +46,10 @@ function sameInterval(left, right) {
   );
 }
 
-function relatedInterval(left, right) {
-  if (sameInterval(left, right)) return true;
-  if (
-    overlapRatio(left?.new_start, left?.new_end, right?.new_start, right?.new_end) <
-    0.5
-  )
-    return false;
-  const leftHasSource =
-    Number.isFinite(left?.original_start) && Number.isFinite(left?.original_end);
-  const rightHasSource =
-    Number.isFinite(right?.original_start) && Number.isFinite(right?.original_end);
-  if (!leftHasSource || !rightHasSource) return leftHasSource === rightHasSource;
-  return (
-    overlapRatio(
-      left.original_start,
-      left.original_end,
-      right.original_start,
-      right.original_end,
-    ) >= 0.35
-  );
-}
-
 function rowsForRelationship(family, rows) {
   return rows.filter((row) =>
     family.rawCandidates.some((candidate) =>
-      relatedInterval(row.interval, candidate),
+      sameInterval(row.interval, candidate),
     ),
   );
 }
@@ -101,19 +65,23 @@ function normalizedStem(label) {
 }
 
 function evidenceForRow(row) {
-  const evidence = Array.isArray(row.evidence) ? [...row.evidence] : [];
-  if (evidence.length || row.status !== "checked") return evidence;
-  return (row.suggested_instruments || []).map((instrument) => {
-    const stem = normalizedStem(instrument);
-    return {
-      source_stem: stem,
-      new_song_stem: stem,
-      dtw_result: "accepted",
-      duration_ratio: null,
-      interpretation: "Possible supporting match",
-      reason: "Accepted same-stem comparison",
-    };
-  });
+  // A label without the stored comparison is not accepted alignment evidence.
+  if (row.context_only) return [];
+  return Array.isArray(row.evidence) ? row.evidence.filter(e => e.scope !== "context") : [];
+}
+
+function presenceHtml(rows) {
+  const checked = rows.filter(row => row.status === "checked");
+  if (!checked.some(row => row.source_sounds?.length || row.new_sounds?.length)) return "";
+  const sounds = values => values?.length
+    ? values.map(value => `${esc(value.instrument)} (${Number(value.start).toFixed(2)}–${Number(value.end).toFixed(2)} s${value.scope === "context" ? ", surrounding context" : ""})`).join(", ")
+    : "No clear estimate";
+  return `<details class="instrumentPresence"><summary>Sounds at each timestamp</summary>
+    <p>Estimated sounds present in each recording; this does not establish which sounds were sampled. Identical source intervals share one estimate; the new mix can differ. “Other” remains unidentified.</p>
+    ${checked.map(row => `<div><strong>New ${Number(row.interval.new_start).toFixed(2)}–${Number(row.interval.new_end).toFixed(2)} s · Original ${Number(row.interval.original_start).toFixed(2)}–${Number(row.interval.original_end).toFixed(2)} s</strong><br>
+      Original: ${sounds(row.source_sounds)}<br>New mix: ${sounds(row.new_sounds)}
+      ${row.context_only ? "<small>Alignment was checked in surrounding context only.</small>" : ""}</div>`).join("")}
+  </details>`;
 }
 
 export function summarizeRelationshipEvidence(family, rows = []) {
@@ -136,15 +104,18 @@ export function summarizeRelationshipEvidence(family, rows = []) {
         result: "rejected",
         ratios: [],
         moments: new Set(),
+        checkedMoments: new Set(),
         interpretation: "",
       };
       if (resultRank(evidence.dtw_result) > resultRank(current.result)) {
         current.result = evidence.dtw_result;
         current.interpretation = evidence.interpretation || evidence.reason || "";
       }
-      if (Number.isFinite(evidence.duration_ratio))
-        current.ratios.push(evidence.duration_ratio);
-      current.moments.add(row.occurrence_id || `${rowIndex}`);
+      current.checkedMoments.add(row.occurrence_id || `${rowIndex}`);
+      if (evidence.dtw_result === "accepted") {
+        if (Number.isFinite(evidence.duration_ratio)) current.ratios.push(evidence.duration_ratio);
+        current.moments.add(row.occurrence_id || `${rowIndex}`);
+      }
       pairs.set(key, current);
     }
   });
@@ -156,6 +127,7 @@ export function summarizeRelationshipEvidence(family, rows = []) {
       result: entry.result,
       durationRatio: median(entry.ratios),
       momentCount: entry.moments.size,
+      checkedMomentCount: entry.checkedMoments.size,
       interpretation: entry.interpretation,
     }))
     .sort(
@@ -181,7 +153,7 @@ function evidenceEntryHtml(entry) {
   const ratio = Number.isFinite(entry.durationRatio)
     ? `${entry.durationRatio.toFixed(2)}× duration`
     : "";
-  const moments = `${entry.momentCount} ${entry.momentCount === 1 ? "moment" : "moments"}`;
+  const moments = `${entry.momentCount} of ${entry.checkedMomentCount} checked moments support this comparison`;
   const detail = [ratio, moments].filter(Boolean).join(" · ");
   return `<div class="stemEvidenceItem">
     <div><strong>${esc(titleCase(entry.sourceStem))} → ${esc(titleCase(entry.newStem))}</strong><span class="dtwResult ${esc(entry.result)}">${esc(titleCase(entry.result))}</span></div>
@@ -199,7 +171,7 @@ function evidenceHtml(family) {
   if (!summary.matchedCount) {
     body = '<span class="evidenceState">Not checked</span><small>No matching stem result is stored for this relationship.</small>';
   } else if (!summary.checkedCount && summary.tooShort === summary.matchedCount) {
-    body = '<span class="evidenceState">Too short to assess</span><small>Demucs requires at least two seconds of paired audio.</small>';
+    body = '<span class="evidenceState">Too short to assess</span><small>This older result skipped short clips. Rerun instrument checks to estimate sounds using surrounding context.</small>';
   } else if (!summary.checkedCount && summary.failed) {
     body = '<span class="evidenceState">Check failed</span><small>Retry the stem + DTW check above.</small>';
   } else if (!summary.checkedCount) {
@@ -214,14 +186,14 @@ function evidenceHtml(family) {
       body += `<details class="moreStemEvidence"><summary>View ${remaining.length} more stem result${remaining.length === 1 ? "" : "s"}</summary><div class="stemEvidenceList">${remaining.map(evidenceEntryHtml).join("")}</div></details>`;
   }
   const progress = assessable
-    ? `${summary.checkedCount} of ${assessable} eligible matched moments checked`
-    : `${summary.checkedCount} matched moments checked`;
+    ? `${summary.checkedCount} of ${assessable} eligible moments checked`
+    : `${summary.checkedCount} moments checked`;
   const exclusions = [
     summary.tooShort ? `${summary.tooShort} too short` : "",
     summary.noSource ? `${summary.noSource} missing original time` : "",
     summary.pending ? `${summary.pending} pending` : "",
   ].filter(Boolean);
-  return `${body}<small class="evidenceProgress">${esc(progress)}${exclusions.length ? ` · ${esc(exclusions.join(" · "))}` : ""}</small>`;
+  return `${body}${presenceHtml(rowsForRelationship(family, latestInstrumentRows))}<small class="evidenceProgress">${esc(progress)}${exclusions.length ? ` · ${esc(exclusions.join(" · "))}` : ""}</small>`;
 }
 
 function readNumber(cell) {
@@ -311,7 +283,7 @@ function enrichRelationshipTable(track) {
       heading.textContent = "Stem + DTW evidence";
     const description = controls.querySelector("p.muted");
     const descriptionText =
-      "Demucs estimates the stem used at each matched moment, then stem-level DTW tests whether that element aligns. Results appear in the final column below.";
+      "Compare supporting alignments and estimated sounds at each timestamp below. Short clips use surrounding context; an instrument present in both mixes is not proof of sampling.";
     if (description && description.textContent !== descriptionText)
       description.textContent = descriptionText;
   }

@@ -7,20 +7,15 @@ from pathlib import Path
 from time import monotonic
 
 from lastrada.alignment.stems import compare_candidate_stems
-from lastrada.pipeline import _stem_evidence_records, short_stem_candidate
+from lastrada.pipeline import _stem_evidence_records
 from lastrada.reporting.suggestions import suggested_intervals
 from lastrada.schemas.models import InstrumentOccurrence
 from lastrada.separation.demucs import DemucsSeparator, StemSeparationUnavailable
 
-LABELS = {
-    "guitar": "Guitar",
-    "piano": "Piano",
-    "bass": "Bass",
-    "drums": "Drums",
-    "vocals": "Vocals",
-    "other": "Other sounds (unidentified)",
-}
-TERMINAL = {"checked", "no_source", "too_short"}
+from lastrada.separation.presence import LABELS, context_probe, describe_region
+
+EVIDENCE_VERSION = 2
+TERMINAL = {"checked", "no_source"}
 MIN_PROBE_SECONDS = 2.0
 
 
@@ -44,28 +39,20 @@ def occurrence_rows(result, model_name=None):
             )
         )
         row.candidate_number = index
-        if model_name and row.model_name != model_name:
+        if row.evidence_version != EVIDENCE_VERSION or (
+            model_name and row.model_name != model_name
+        ):
             row = InstrumentOccurrence(
                 occurrence_id=key,
                 candidate_number=index,
                 interval=interval.model_copy(deep=True),
-                model_name=model_name,
+                model_name=model_name or row.model_name,
+                evidence_version=EVIDENCE_VERSION,
             )
         if interval.original_start is None:
             row.status, row.reason = (
                 "no_source",
                 "Original-track times are needed for an instrument comparison.",
-            )
-        elif (
-            min(
-                interval.new_end - interval.new_start,
-                interval.original_end - interval.original_start,
-            )
-            < MIN_PROBE_SECONDS
-        ):
-            row.status, row.reason = (
-                "too_short",
-                "This moment is too short for a reliable instrument comparison (under two seconds).",
             )
         rows.append(row)
     return rows
@@ -97,6 +84,27 @@ def instrument_prefill(result, model_name=None):
     return {"element": ", ".join(labels), "method": "Sampled the original recording"}
 
 
+def stabilize_source_descriptions(rows):
+    """Share only source presence for identical source times and model versions.
+
+    Different new mixes keep their own estimates and alignment decisions. Nearby
+    or overlapping source passages are deliberately not treated as identical.
+    """
+    descriptions = {}
+    for row in rows:
+        if row.status != "checked" or not row.source_sounds:
+            continue
+        key = (
+            row.model_name,
+            row.evidence_version,
+            row.interval.original_start,
+            row.interval.original_end,
+        )
+        if key not in descriptions:
+            descriptions[key] = row.source_sounds
+        row.source_sounds = [s.model_copy(deep=True) for s in descriptions[key]]
+
+
 def run_occurrence_instruments(
     result,
     original,
@@ -119,7 +127,8 @@ def run_occurrence_instruments(
     count = 0
 
     def persist():
-        updated.methods["instruments"] = f"demucs_{settings.stem_model_name}_per_occurrence_v1"
+        stabilize_source_descriptions(updated.instrument_occurrences)
+        updated.methods["instruments"] = f"demucs_{settings.stem_model_name}_per_occurrence_v2"
         updated.timings_seconds["instrument_checks"] = monotonic() - began
         if on_progress:
             on_progress(updated)
@@ -147,7 +156,17 @@ def run_occurrence_instruments(
         separator.timeout_seconds = max(
             1, min(settings.stem_timeout_seconds, int((remaining - 10) / 2))
         )
-        row.probe = short_stem_candidate([row.interval], min(8.0, settings.stem_probe_seconds))
+        row.probe = context_probe(
+            row.interval,
+            result.durations["original"],
+            result.durations["new"],
+            min(8.0, settings.stem_probe_seconds),
+        )
+        row.context_only = any(
+            getattr(row.probe, prefix + "_start") < getattr(row.interval, prefix + "_start") - 1e-6
+            or getattr(row.probe, prefix + "_end") > getattr(row.interval, prefix + "_end") + 1e-6
+            for prefix in ("original", "new")
+        )
         row.evidence, row.suggested_instruments = [], []
         try:
             comparison = compare_candidate_stems(
@@ -164,17 +183,33 @@ def run_occurrence_instruments(
                 include_cross_other=False,
             )
             row.evidence = _stem_evidence_records([comparison])
+            row.source_sounds = describe_region(
+                getattr(comparison, "source_region", None),
+                row.interval.original_start,
+                row.interval.original_end,
+            )
+            row.new_sounds = describe_region(
+                getattr(comparison, "derivative_region", None),
+                row.interval.new_start,
+                row.interval.new_end,
+            )
             for evidence in row.evidence:
                 evidence.candidate_number = row.candidate_number
+                if row.context_only:
+                    evidence.scope = "context"
+                    evidence.interpretation = "Surrounding context only; sample reuse unconfirmed"
                 if (
-                    evidence.dtw_result == "accepted"
+                    not row.context_only
+                    and evidence.dtw_result == "accepted"
                     and evidence.source_stem == evidence.new_song_stem
                     and evidence.source_stem in LABELS
                 ):
                     row.suggested_instruments.append(LABELS[evidence.source_stem])
             row.status = "checked"
             row.reason = (
-                "Possible supporting matches in the checked portion; confirm by listening."
+                "Short sample: estimated sounds are shown separately. Alignment checks use surrounding context, not proof of reuse in this interval."
+                if row.context_only
+                else "Possible supporting matches in the checked portion; confirm by listening."
                 if row.suggested_instruments
                 else "No reliable instrument match in the checked portion."
             )
@@ -195,8 +230,8 @@ def run_occurrence_instruments(
 def record_initial_comparisons(result, candidates, updated, comparisons, settings):
     """Attach the fast profile's initial comparisons without repeating separation.
 
-    Main-flow DTW retains its exploratory acceptance rules. Instrument prefills
-    additionally reject short probes and extreme duration ratios. A cross-label
+    Main-flow DTW uses slope and content checks. Instrument prefills additionally
+    exclude context-only comparisons and extreme duration ratios. A cross-label
     match can refine a candidate without establishing a named instrument.
     """
     eligible = [
@@ -229,13 +264,25 @@ def record_initial_comparisons(result, candidates, updated, comparisons, setting
             InstrumentOccurrence(
                 occurrence_id=occurrence_id(interval),
                 model_name=settings.stem_model_name,
+                evidence_version=EVIDENCE_VERSION,
                 candidate_number=index + 1,
                 interval=interval.model_copy(deep=True),
                 probe=probe.model_copy(deep=True),
-                status="too_short" if too_short else "checked",
+                status="pending" if too_short else "checked",
+                source_sounds=describe_region(
+                    getattr(comparison, "source_region", None),
+                    interval.original_start,
+                    interval.original_end,
+                ),
+                new_sounds=describe_region(
+                    getattr(comparison, "derivative_region", None),
+                    interval.new_start,
+                    interval.new_end,
+                ),
                 evidence=evidence,
                 suggested_instruments=labels,
                 reason="Initial fast-profile comparison; confirm estimates by listening.",
             )
         )
     result.instrument_occurrences = rows
+    stabilize_source_descriptions(rows)

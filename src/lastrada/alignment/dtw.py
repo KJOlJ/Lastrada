@@ -42,9 +42,7 @@ def _resample(samples: np.ndarray, source_rate: int, target_rate: int) -> np.nda
     if source_rate == target_rate:
         return samples.astype(np.float32, copy=False)
     divisor = math.gcd(source_rate, target_rate)
-    return resample_poly(
-        samples, target_rate // divisor, source_rate // divisor
-    ).astype(np.float32)
+    return resample_poly(samples, target_rate // divisor, source_rate // divisor).astype(np.float32)
 
 
 def _segment(audio, start: float, end: float, sample_rate: int) -> np.ndarray:
@@ -93,65 +91,56 @@ def _chroma(
         if np.any(mask):
             chroma[pitch_class] = magnitude[mask].sum(axis=0)
 
+    # Remove the shared broadband floor: unrelated noise must not appear similar
+    # merely because all twelve pitch classes have energy.
     chroma = np.sqrt(np.maximum(chroma, 0.0))
+    chroma -= chroma.mean(axis=0, keepdims=True)
     norms = np.linalg.norm(chroma, axis=0, keepdims=True)
     chroma /= np.maximum(norms, 1e-12)
     return chroma
 
 
 def _local_cost(source: np.ndarray, target: np.ndarray) -> np.ndarray:
-    # Chroma columns are already normalized; cosine distance is 1 - dot product.
-    return 1.0 - np.clip(source.T @ target, -1.0, 1.0)
+    return np.maximum(0.0, 1.0 - np.clip(source.T @ target, -1.0, 1.0))
 
 
 def _subsequence_dtw(cost: np.ndarray):
-    """Align the full source (rows) to the best subsequence of target (columns)."""
-    source_frames, target_frames = cost.shape
-    if not source_frames or not target_frames:
+    """Slope-limited subsequence DTW; never collapse a phrase onto one frame.
+
+    Steps consume (source, target) frames in ratios 1:1, 1:2 or 2:1.
+    Costs are weighted by source frames so paths have comparable objectives.
+    """
+    m, n = cost.shape
+    if not m or not n:
         return None, float("inf")
-
-    accumulated = np.full((source_frames, target_frames), np.inf, dtype=np.float64)
-    back = np.full((source_frames, target_frames), -1, dtype=np.int8)
-
-    # The source query may begin anywhere in the target search region.
-    accumulated[0, :] = cost[0, :]
-
-    for source_index in range(1, source_frames):
-        for target_index in range(target_frames):
-            choices = []
-            if target_index > 0:
-                choices.append((accumulated[source_index - 1, target_index - 1], 0))
-            choices.append((accumulated[source_index - 1, target_index], 1))
-            if target_index > 0:
-                choices.append((accumulated[source_index, target_index - 1], 2))
-            best_cost, move = min(choices, key=lambda item: item[0])
-            accumulated[source_index, target_index] = (
-                cost[source_index, target_index] + best_cost
-            )
-            back[source_index, target_index] = move
-
-    end_target = int(np.argmin(accumulated[-1]))
-    source_index, target_index = source_frames - 1, end_target
-    path = [(source_index, target_index)]
-
-    while source_index > 0:
-        move = int(back[source_index, target_index])
+    accumulated = np.full((m, n), np.inf)
+    back = np.full((m, n), -1, dtype=np.int8)
+    accumulated[0] = cost[0]
+    for i in range(1, m):
+        choices = np.full((3, n), np.inf)
+        choices[0, 1:] = accumulated[i - 1, :-1] + cost[i, 1:]
+        choices[1, 2:] = accumulated[i - 1, :-2] + cost[i, 2:]
+        if i > 1:
+            choices[2, 1:] = accumulated[i - 2, :-1] + cost[i - 1, 1:] + cost[i, 1:]
+        back[i] = np.argmin(choices, axis=0)
+        accumulated[i] = np.min(choices, axis=0)
+    j = int(np.argmin(accumulated[-1]))
+    if not np.isfinite(accumulated[-1, j]):
+        return None, float("inf")
+    mean_cost = float(accumulated[-1, j] / m)
+    i = m - 1
+    path = [(i, j)]
+    while i > 0:
+        move = back[i, j]
         if move == 0:
-            source_index -= 1
-            target_index -= 1
+            i, j = i - 1, j - 1
         elif move == 1:
-            source_index -= 1
-        elif move == 2 and target_index > 0:
-            target_index -= 1
+            i, j = i - 1, j - 2
         else:
-            break
-        path.append((source_index, target_index))
-
-    path.reverse()
-    mean_cost = float(
-        accumulated[-1, end_target] / max(len(path), 1)
-    )
-    return np.asarray(path, dtype=int), mean_cost
+            path.append((i - 1, j))
+            i, j = i - 2, j - 1
+        path.append((i, j))
+    return np.asarray(path[::-1], dtype=int), mean_cost
 
 
 def duration_ratio_is_plausible(
@@ -241,6 +230,13 @@ def refine_candidate_dtw_details(
             search_end=search_end,
         )
 
+    # A steady note/chord cannot identify a particular sampled phrase. Require
+    # temporal information in addition to a low distance. These engineering
+    # thresholds are abstention rules, not calibrated detection probabilities.
+    temporal_variation = float(np.mean(np.var(source_chroma, axis=1)))
+    if temporal_variation < 0.002:
+        return _rejected(interval, "insufficient changing pitch information")
+
     best = None
     seconds_per_frame = hop / analysis_rate
 
@@ -250,13 +246,18 @@ def refine_candidate_dtw_details(
         if path is None or not len(path):
             continue
 
+        # A good fit must also beat the reversed query. Shared timbre or a
+        # stationary background alone should not count as ordered support.
+        _, reversed_cost = _subsequence_dtw(_local_cost(shifted[:, ::-1], target_chroma))
+        if mean_cost > 0.30 or reversed_cost - mean_cost < 0.04:
+            continue
+
         matched_target_frames = path[:, 1]
-        refined_start = (
-            search_start + float(matched_target_frames.min()) * seconds_per_frame
-        )
+        refined_start = search_start + float(matched_target_frames.min()) * seconds_per_frame
         refined_end = (
             search_start
-            + float(matched_target_frames.max() + 1) * seconds_per_frame
+            + float(matched_target_frames.max()) * seconds_per_frame
+            + min(2048, len(source_y)) / analysis_rate
         )
         refined_start = max(0.0, refined_start)
         refined_end = min(new.duration, refined_end)
@@ -288,7 +289,7 @@ def refine_candidate_dtw_details(
     if best is None:
         return _rejected(
             interval,
-            "no alignment passed overlap and duration guardrails",
+            "no distinctive alignment passed content, overlap and duration guardrails",
             source_duration=source_duration,
             search_start=search_start,
             search_end=search_end,
@@ -306,7 +307,7 @@ def refine_candidate_dtw_details(
     return DTWRefinementResult(
         interval=refined,
         accepted=True,
-        reason="alignment passed guardrails",
+        reason="alignment passed content, slope and duration guardrails; listening required",
         mean_cost=best["mean_cost"],
         pitch_shift_semitones=best["pitch_shift"],
         duration_ratio=best["duration"] / source_duration,

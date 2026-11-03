@@ -37,7 +37,7 @@ def _stem_verdict(item):
 
 def _stem_interpretation(item, verdict):
     if verdict == "accepted" and item.same_label:
-        return "strong supporting evidence"
+        return "supporting alignment; confirm by listening"
     if verdict == "accepted":
         return "possible separator spillover"
     if verdict == "weak":
@@ -317,7 +317,7 @@ def analyze_pair(
                 candidates = refined_candidates
                 result.timings_seconds["localization"] += perf_counter() - t
                 result.methods["alignment"] = (
-                    "direct_waveform_then_guarded_dtw"
+                    "direct_waveform_then_content_guarded_dtw_v2"
                     if dtw_used
                     else "direct_waveform_or_coarse_sampleid"
                 )

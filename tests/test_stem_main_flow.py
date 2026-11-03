@@ -110,11 +110,11 @@ def test_explicit_lab_setting_can_evaluate_all_candidates(monkeypatch):
     assert len(calls) == 50
 
 
-def test_default_dtw_guardrails_allow_point_one_to_ten_x():
+def test_default_dtw_guardrails_reject_extreme_duration_ratios():
     settings = Settings()
 
-    assert settings.dtw_min_duration_ratio == 0.1
-    assert settings.dtw_max_duration_ratio == 10.0
+    assert settings.dtw_min_duration_ratio == 0.5
+    assert settings.dtw_max_duration_ratio == 2.0
     assert settings.stem_max_candidates == 1
     assert settings.stem_model_name == "htdemucs"
     assert settings.stem_probe_seconds == 8.0
@@ -158,7 +158,7 @@ def test_stem_evidence_records_match_reviewer_table_verdicts():
         "rejected",
         "weak",
     ]
-    assert records[0].interpretation == "strong supporting evidence"
+    assert records[0].interpretation == "supporting alignment; confirm by listening"
     assert records[1].interpretation == "possible separator spillover"
     assert records[2].interpretation == "no supporting vocal alignment"
     assert records[3].interpretation == "no useful alignment"

@@ -44,7 +44,8 @@ try {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  const browser = await chromium.launch({
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}), headless: true, args: ["--no-sandbox"] });
   try {
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -52,7 +53,7 @@ try {
       () =>
         document.querySelectorAll(".stemEvidenceItem").length === 2 &&
         [...document.querySelectorAll(".dtwResult")].every(
-          (item) => item.textContent === "Matched",
+          (item) => item.textContent === "Supporting evidence",
         ),
     );
 
