@@ -5,6 +5,10 @@ let mockTransport = false;
 let scheduled = false;
 const automaticRuns = new Map();
 
+function setText(element, value) {
+  if (element && element.textContent !== value) element.textContent = value;
+}
+
 function normalize(value) {
   return String(value || "")
     .replace(/\s+/g, " ")
@@ -87,11 +91,10 @@ function enhanceAutomaticInstrumentFlow() {
 
   controls.classList.add("automaticInstrumentControls");
   const heading = controls.querySelector("h2");
-  if (heading) heading.textContent = "Automatic stem + DTW evidence";
+  setText(heading, "Automatic instrument evidence");
   const description = controls.querySelector("p.muted");
   if (description) {
-    description.textContent =
-      "After Sony identifies candidate regions, Demucs estimates the stems and stem-level DTW tests those matches automatically. Results appear in the final column below.";
+    setText(description, "Instrument checks run automatically. Compare supporting alignments and estimated sounds at each timestamp below. Short clips use surrounding context; presence in both mixes does not establish sampling.");
   }
 
   const status = statusLine(controls);
@@ -109,11 +112,11 @@ function enhanceAutomaticInstrumentFlow() {
 
   if (action) {
     const label = normalize(action.textContent).toLowerCase();
-    status.textContent = label.includes("continue")
+    setText(status, label.includes("continue")
       ? "Automatic Demucs + DTW analysis is continuing with the remaining matched moments."
       : label.includes("try")
         ? "Automatic Demucs + DTW analysis is retrying after an incomplete pass."
-        : "Automatic Demucs + DTW analysis is starting.";
+        : "Automatic Demucs + DTW analysis is starting.");
 
     const state = runState();
     const signature = controlsSignature(controls);
@@ -145,16 +148,16 @@ function enhanceAutomaticInstrumentFlow() {
   } else if (
     text.includes("could not finish") ||
     text.includes("check failed") ||
-    text.includes("unavailable")
+    text.includes("model unavailable")
   ) {
     status.textContent =
       "Automatic Demucs + DTW analysis could not finish. The Sony and timing analysis is still preserved.";
   } else if (
-    text.includes("no eligible paired region") ||
+    text.includes("no paired region with original timestamps") ||
     text.includes("instrument check unavailable")
   ) {
     status.textContent =
-      "No paired region is long enough for automatic Demucs + DTW analysis.";
+      "Original-track timestamps are needed for automatic instrument checks.";
   } else if (
     text.includes("completed results are reused") ||
     /\d+ of \d+ moments compared/.test(text)

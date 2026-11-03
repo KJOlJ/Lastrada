@@ -529,6 +529,8 @@ function python(mode, body) {
     if (process.env.LASTRADA_BROWSER_OUTPUT) {
       fs.mkdirSync(process.env.LASTRADA_BROWSER_OUTPUT, { recursive: true });
       const presence = p.locator("[data-stem-dtw-evidence] .instrumentPresence").first();
+      if (data.instrument_rows?.some(row => row.status === "checked" && row.source_sounds?.length))
+        await presence.waitFor();
       if (await presence.count()) {
         await presence.locator("summary").click();
         await master.screenshot({ path: path.join(process.env.LASTRADA_BROWSER_OUTPUT, "source-and-new-instruments.png") });

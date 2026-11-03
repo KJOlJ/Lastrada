@@ -393,14 +393,14 @@ function derivativeTimestampHtml(family) {
 function summaryTable(families) {
   return `<section class="groupedUseSummary" aria-label="Sample relationships">
     <h3>Sample relationships</h3>
-    <p class="muted">Each row links one original passage, or a set of equivalent original passages, to the derivative timestamps that matched it. Overlapping detector windows are counted once.</p>
+    <p class="muted">Each row groups possible uses of a source passage. Confirm the suggested times by listening. Overlapping detector windows are counted once.</p>
     <div class="tableWrap groupedUseTable"><table>
-      <thead><tr><th>Original track</th><th>Derivative track</th><th>Type of sampling</th><th>Matched derivative timestamps</th></tr></thead>
+      <thead><tr><th>Original track</th><th>Derivative track</th><th>Type of sampling</th><th>Suggested times in your track</th></tr></thead>
       <tbody>${families
         .map(
           (family) => `<tr>
             <td>${sourcePassageHtml(family)}</td>
-            <td><strong>${family.occurrenceCount} matched ${family.occurrenceCount === 1 ? "use" : "uses"}</strong><small>${family.pattern}</small></td>
+            <td><strong>${family.occurrenceCount} possible ${family.occurrenceCount === 1 ? "use" : "uses"}</strong><small>${family.pattern}</small></td>
             <td><span class="useType ${family.useType === "Repeated" ? "repeated" : "oneOff"}">${family.useType}</span></td>
             <td>${derivativeTimestampHtml(family)}</td>
           </tr>`,

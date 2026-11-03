@@ -157,7 +157,7 @@ jobs:
           curl --fail --silent --show-error --retry 5 --retry-delay 3 \
             "https://lastrada-alt.web.app/grouped-timestamps.js?revision=${GITHUB_SHA}" \
             --output /tmp/grouped-timestamps.js
-          grep -q "Matched derivative timestamps" /tmp/grouped-timestamps.js
+          grep -q "Suggested times in your track" /tmp/grouped-timestamps.js
           curl --fail --silent --show-error --retry 5 --retry-delay 3 \
             "https://lastrada-alt.web.app/config.json?revision=${GITHUB_SHA}" \
             --output /tmp/config.json

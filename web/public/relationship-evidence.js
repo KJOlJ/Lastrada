@@ -279,12 +279,12 @@ function enrichRelationshipTable(track) {
     controls.classList.add("relationshipEvidenceControls");
     if (controls.parentElement !== summary) summary.insertBefore(controls, tableWrap);
     const heading = controls.querySelector("h2");
-    if (heading && heading.textContent !== "Stem + DTW evidence")
+    if (!controls.classList.contains("automaticInstrumentControls") && heading && heading.textContent !== "Stem + DTW evidence")
       heading.textContent = "Stem + DTW evidence";
     const description = controls.querySelector("p.muted");
     const descriptionText =
       "Compare supporting alignments and estimated sounds at each timestamp below. Short clips use surrounding context; an instrument present in both mixes is not proof of sampling.";
-    if (description && description.textContent !== descriptionText)
+    if (!controls.classList.contains("automaticInstrumentControls") && description && description.textContent !== descriptionText)
       description.textContent = descriptionText;
   }
 }
