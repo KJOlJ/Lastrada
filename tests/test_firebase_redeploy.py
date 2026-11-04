@@ -131,7 +131,17 @@ def test_missing_permission_is_reported_without_mutating_iam_or_printing_token(m
     with pytest.raises(RuntimeError, match="cloudbuild.builds.create") as error:
         redeploy.check_deployment_permissions()
     assert "private-token" not in str(error.value)
+    for role in ["build", "worker", "api"]:
+        assert f"lastrada-{role}@" in str(error.value)
     assert len(calls) == 2
+
+
+def test_permission_inspection_errors_do_not_claim_a_missing_grant(monkeypatch):
+    monkeypatch.setattr(redeploy, "run", lambda *args: "unused")
+    monkeypatch.setattr(redeploy, "fetch", lambda *args, **kwargs: (503, {}, b"unavailable"))
+    with pytest.raises(RuntimeError, match="could not verify") as error:
+        redeploy.check_deployment_permissions()
+    assert "HTTP 503" in str(error.value) and "lacks" not in str(error.value)
 
 
 def test_build_uses_existing_account_and_returns_immutable_image(monkeypatch, tmp_path):

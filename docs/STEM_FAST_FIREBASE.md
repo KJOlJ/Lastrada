@@ -176,3 +176,11 @@ The GitHub workflow checks successful CI for the selected application commit. A
 manual Cloud Shell operator must also confirm those checks before `--mode apply`.
 Do not rerun `bootstrap.py` to update this existing stack: it is a provisioning
 path with older defaults for site origins and daily quotas.
+
+If the existing GitHub deployment account lacks Cloud Build submission or
+service-account `actAs` permissions, inspection stops before building or updating
+anything and reports the specific missing permissions. Use an already authorized
+project-owner Cloud Shell session for the same helper; no new key or IAM grant is
+needed when that signed-in account already has the required access. Cloud Shell
+credentials are separate from Codex and GitHub credentials. Do not paste them into
+chat or commit them.

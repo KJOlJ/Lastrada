@@ -189,6 +189,7 @@ def check_deployment_permissions():
         )
         for role in ("build", "worker", "api")
     )
+    missing = []
     for url, permission, resource in targets:
         status, _, body = fetch(
             url,
@@ -199,10 +200,14 @@ def check_deployment_permissions():
             },
             data=json.dumps({"permissions": [permission]}).encode(),
         )
-        if status != 200 or permission not in json.loads(body).get("permissions", []):
-            raise RuntimeError(
-                f"Deployment account {caller} lacks {permission} on {resource}. No IAM changes made."
-            )
+        if status != 200:
+            missing.append(f"could not verify {permission} on {resource} (HTTP {status})")
+        elif permission not in json.loads(body).get("permissions", []):
+            missing.append(f"lacks {permission} on {resource}")
+    if missing:
+        raise RuntimeError(
+            f"Deployment account {caller}: {'; '.join(missing)}. No IAM changes made."
+        )
 
 
 def inspect():
