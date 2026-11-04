@@ -112,18 +112,20 @@ function enhanceAutomaticInstrumentFlow() {
 
   if (action) {
     const label = normalize(action.textContent).toLowerCase();
+    const state = runState();
+    if (state.attempts >= MAX_AUTOMATIC_PASSES) {
+      setText(status,
+        "Automatic Demucs + DTW analysis reached its safe retry limit. Completed evidence is preserved.");
+      return;
+    }
     setText(status, label.includes("continue")
       ? "Automatic Demucs + DTW analysis is continuing with the remaining matched moments."
       : label.includes("try")
         ? "Automatic Demucs + DTW analysis is retrying after an incomplete pass."
         : "Automatic Demucs + DTW analysis is starting.");
 
-    const state = runState();
     const signature = controlsSignature(controls);
-    if (
-      state.attempts < MAX_AUTOMATIC_PASSES &&
-      !state.signatures.has(signature)
-    ) {
+    if (!state.signatures.has(signature)) {
       state.attempts += 1;
       state.signatures.add(signature);
       window.setTimeout(() => {
@@ -134,39 +136,36 @@ function enhanceAutomaticInstrumentFlow() {
           action.click();
         }
       }, 0);
-    } else if (state.attempts >= MAX_AUTOMATIC_PASSES) {
-      status.textContent =
-        "Automatic Demucs + DTW analysis reached its safe retry limit. Completed evidence is preserved.";
     }
     return;
   }
 
   const text = normalize(controls.textContent).toLowerCase();
   if (controls.querySelector(".spinner") || text.includes("in progress")) {
-    status.textContent =
-      "Automatic Demucs + DTW analysis is running. Results will appear in the relationship table.";
+    setText(status,
+      "Automatic Demucs + DTW analysis is running. Results will appear in the relationship table.");
   } else if (
     text.includes("could not finish") ||
     text.includes("check failed") ||
     text.includes("model unavailable")
   ) {
-    status.textContent =
-      "Automatic Demucs + DTW analysis could not finish. The Sony and timing analysis is still preserved.";
+    setText(status,
+      "Automatic Demucs + DTW analysis could not finish. The Sony and timing analysis is still preserved.");
   } else if (
     text.includes("no paired region with original timestamps") ||
     text.includes("instrument check unavailable")
   ) {
-    status.textContent =
-      "Original-track timestamps are needed for automatic instrument checks.";
+    setText(status,
+      "Original-track timestamps are needed for automatic instrument checks.");
   } else if (
     text.includes("completed results are reused") ||
     /\d+ of \d+ moments compared/.test(text)
   ) {
-    status.textContent =
-      "Automatic Demucs + DTW analysis is complete. Review the evidence in the relationship table.";
+    setText(status,
+      "Automatic Demucs + DTW analysis is complete. Review the evidence in the relationship table.");
   } else {
-    status.textContent =
-      "Automatic Demucs + DTW analysis will begin when paired timestamps are ready.";
+    setText(status,
+      "Automatic Demucs + DTW analysis will begin when paired timestamps are ready.");
   }
 }
 

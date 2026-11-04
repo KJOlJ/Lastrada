@@ -123,6 +123,53 @@ const server = http.createServer((request, response) => {
     await page.waitForTimeout(350);
     if (await page.evaluate(() => window.statusMutations > 2))
       throw Error("Idle automatic status continuously mutates the page");
+
+    async function assertStableStatus(markup, expectedText) {
+      await page.evaluate((value) => {
+        document.querySelector("#view").innerHTML = value;
+      }, markup);
+      await page.waitForFunction((text) =>
+        document.querySelector(".automaticInstrumentStatus")?.textContent === text,
+        expectedText);
+      await page.waitForTimeout(100);
+      const mutations = await page.evaluate(() => new Promise((resolve) => {
+        let count = 0;
+        const observer = new MutationObserver((records) => { count += records.length; });
+        observer.observe(document.querySelector("#instruments"), {
+          childList: true, subtree: true, characterData: true,
+        });
+        setTimeout(() => { observer.disconnect(); resolve(count); }, 350);
+      }));
+      if (mutations > 2)
+        throw Error(`Status keeps rewriting the DOM: ${expectedText}`);
+    }
+
+    // Exhaust the real six-pass bound, then check the terminal control state.
+    for (const progress of [2, 3, 4]) {
+      await page.evaluate((markup) => {
+        document.querySelector("#view").innerHTML = markup;
+      }, controls(`${progress} of 6 moments compared.`, "Continue instrument checks"));
+      await page.waitForFunction((count) => window.automaticInstrumentClicks === count,
+        progress + 2);
+    }
+    await assertStableStatus(
+      controls("5 of 6 moments compared.", "Continue instrument checks"),
+      "Automatic Demucs + DTW analysis reached its safe retry limit. Completed evidence is preserved.",
+    );
+    if (await page.evaluate(() => window.automaticInstrumentClicks !== 6))
+      throw Error("Automatic checks exceeded the six-pass bound");
+
+    const noAction = (body) => `<section id="instruments"><h2>Instruments</h2><p class="muted">Checks</p>${body}</section>`;
+    for (const [body, expectedText] of [
+      ['<p role="status">6 of 6 moments compared.</p><p>Completed results are reused.</p>',
+        "Automatic Demucs + DTW analysis is complete. Review the evidence in the relationship table."],
+      ['<span class="spinner"></span><button disabled>Instrument check in progress</button>',
+        "Automatic Demucs + DTW analysis is running. Results will appear in the relationship table."],
+      ['<p>No paired region with original timestamps is available.</p>',
+        "Original-track timestamps are needed for automatic instrument checks."],
+      ['<p class="warning">The instrument check could not finish.</p>',
+        "Automatic Demucs + DTW analysis could not finish. The Sony and timing analysis is still preserved."],
+    ]) await assertStableStatus(noAction(body), expectedText);
     console.log("Automatic instrument launch tests passed");
   } finally {
     await browser.close();
