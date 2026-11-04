@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from threading import Lock
 
 import numpy as np
 import soundfile as sf
@@ -117,6 +118,8 @@ class DemucsSeparator:
         self.segment_seconds = normalized_segment
         self.overlap = float(overlap)
         self.timeout_seconds = int(timeout_seconds)
+        self._cache_locks = {}
+        self._cache_locks_guard = Lock()
 
     def separate_region(
         self,
@@ -143,14 +146,18 @@ class DemucsSeparator:
         cache_path = self.cache_dir / key
         manifest_path = cache_path / "manifest.json"
 
-        if not manifest_path.is_file():
-            self._run_and_cache(crop, cache_path, crop_start, crop_end)
-
-        return self._load_cached_region(
-            cache_path,
-            candidate_start=float(candidate_start),
-            candidate_end=float(candidate_end),
-        )
+        # Identical source/new crops can share a key. Do not generate or replace
+        # the same cache directory concurrently within a worker.
+        with self._cache_locks_guard:
+            lock = self._cache_locks.setdefault(key, Lock())
+        with lock:
+            if not manifest_path.is_file():
+                self._run_and_cache(crop, cache_path, crop_start, crop_end)
+            return self._load_cached_region(
+                cache_path,
+                candidate_start=float(candidate_start),
+                candidate_end=float(candidate_end),
+            )
 
     def _run_and_cache(
         self,

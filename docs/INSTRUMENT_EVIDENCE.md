@@ -60,6 +60,19 @@ bounds remain: 50 checks / 600 seconds per operation and the existing deployment
 CPU, memory, scaling, permissions and quotas. More clips being eligible can mean
 more batches within those limits.
 
+The optional CPU instrument pass separates its original and new crops concurrently
+with two single-threaded subprocesses. Main analysis remains sequential because
+it may retain the retrieval model in memory; non-CPU separation also stays
+sequential. A per-crop lock prevents simultaneous requests for an identical crop
+from replacing the same cache directory within one separator. Model settings,
+cache identity and alignment rules are unchanged.
+
+The pass reserves time based on its slowest completed check and leaves remaining
+rows pending for a continuation when the budget is tight. A fast cached check
+does not erase that estimate. Partial results and failed rows remain resumable;
+this is a scheduling estimate, not a guarantee that every crop will finish before
+a timeout. A model or download failure still reports its reason.
+
 Deploy API, worker and frontend together for the new schema. Start a new case to
 rerun main timing analysis; a per-moment instrument recheck does not replace saved
 timestamp suggestions. No update is automatically deployed by pushing

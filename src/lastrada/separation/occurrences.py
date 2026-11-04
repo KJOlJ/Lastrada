@@ -126,6 +126,7 @@ def run_occurrence_instruments(
     updated.instrument_occurrences = occurrence_rows(updated, settings.stem_model_name)
     began = monotonic()
     count = 0
+    longest_check_seconds = 0.0
     source_descriptions = {}
 
     def persist():
@@ -140,7 +141,7 @@ def run_occurrence_instruments(
         if row.status in TERMINAL:
             continue
         remaining = budget_seconds - (monotonic() - began)
-        if count >= max_new_checks or remaining < 20:
+        if count >= max_new_checks or remaining < max(20, 1.25 * longest_check_seconds + 10):
             break
         if separator is None:
             try:
@@ -155,8 +156,10 @@ def run_occurrence_instruments(
                 row.status, row.reason = "failed", str(exc)
                 persist()
                 break
+        parallel_separation = settings.stem_device == "cpu"
+        timeout_divisor = 1 if parallel_separation else 2
         separator.timeout_seconds = max(
-            1, min(settings.stem_timeout_seconds, int((remaining - 10) / 2))
+            1, min(settings.stem_timeout_seconds, int((remaining - 10) / timeout_divisor))
         )
         row.probe = context_probe(
             row.interval,
@@ -170,6 +173,7 @@ def run_occurrence_instruments(
             for prefix in ("original", "new")
         )
         row.evidence, row.suggested_instruments = [], []
+        checked_at = monotonic()
         try:
             comparison = compare_candidate_stems(
                 original,
@@ -183,6 +187,7 @@ def run_occurrence_instruments(
                 maximum_duration_ratio=2,
                 minimum_duration=1,
                 include_cross_other=False,
+                parallel_separation=parallel_separation,
             )
             row.evidence = _stem_evidence_records([comparison])
             row.source_sounds = describe_region(
@@ -219,6 +224,7 @@ def run_occurrence_instruments(
             row.status, row.reason = "failed", str(exc)
             persist()
             break  # Model/download failures should not repeat across every row.
+        longest_check_seconds = max(longest_check_seconds, monotonic() - checked_at)
         count += 1
         persist()
     updated.stem_evidence = [e for row in updated.instrument_occurrences for e in row.evidence]

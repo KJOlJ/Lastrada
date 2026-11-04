@@ -8,6 +8,7 @@ drums, or another instrument.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from concurrent.futures import ThreadPoolExecutor
 
 from lastrada.alignment.dtw import refine_candidate_dtw_details
 from lastrada.schemas.models import Interval
@@ -52,8 +53,7 @@ class StemComparisonResult:
         # baseline. The complete table still shows every ordered pair.
         for item in self.evidence:
             if item.accepted and (
-                item.source_stem != "full_mix"
-                or item.derivative_stem != "full_mix"
+                item.source_stem != "full_mix" or item.derivative_stem != "full_mix"
             ):
                 return item
         for item in self.evidence:
@@ -113,23 +113,25 @@ def compare_candidate_stems(
     maximum_duration_ratio: float = 1.5,
     minimum_duration: float = 0.5,
     include_cross_other: bool = True,
+    parallel_separation: bool = False,
 ) -> StemComparisonResult:
     """Separate both candidate regions and run guarded DTW on selected stem pairs."""
     if interval.original_start is None or interval.original_end is None:
         raise ValueError("Stem comparison requires source timestamps")
 
-    source_region = separator.separate_region(
-        original,
-        interval.original_start,
-        interval.original_end,
-        padding_seconds=separation_padding,
-    )
-    derivative_region = separator.separate_region(
-        new,
-        interval.new_start,
-        interval.new_end,
-        padding_seconds=separation_padding,
-    )
+    def separate(audio, start, end):
+        return separator.separate_region(audio, start, end, padding_seconds=separation_padding)
+
+    if parallel_separation:
+        # Only the bounded per-occurrence path opts in. Main analysis may still
+        # retain Sony in memory and uses sequential separation.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            source = pool.submit(separate, original, interval.original_start, interval.original_end)
+            derivative = pool.submit(separate, new, interval.new_start, interval.new_end)
+            source_region, derivative_region = source.result(), derivative.result()
+    else:
+        source_region = separate(original, interval.original_start, interval.original_end)
+        derivative_region = separate(new, interval.new_start, interval.new_end)
 
     local_interval = Interval(
         new_start=derivative_region.candidate_start_local,
@@ -161,9 +163,7 @@ def compare_candidate_stems(
         )
 
         local_refined = detail.interval
-        refined_start = (
-            derivative_region.offset_seconds + local_refined.new_start
-        )
+        refined_start = derivative_region.offset_seconds + local_refined.new_start
         refined_end = derivative_region.offset_seconds + local_refined.new_end
         refined_duration = refined_end - refined_start
 
