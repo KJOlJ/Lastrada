@@ -135,3 +135,44 @@ One additional six-stem per-moment comparison in that freshly built image took
 accepted instrument match; no sound description was invented. Saved progress,
 original timings and prior review were preserved. The remaining optional moments
 were not exhaustively rechecked in this validation.
+
+## Updating the existing alt site without provisioning
+
+The manual **Deploy Firebase Hosting** workflow now has an `inspect` / `redeploy`
+operation for `local/stem-fast`. Select the full application commit that passed
+both validation workflows. The deployment helper archives that exact application
+commit, rather than deploying whatever source happens to be checked out later.
+
+`inspect` performs read-only project/resource/permission checks. `redeploy` builds
+one image with the existing Cloud Build account and build bucket, then updates
+the existing worker, API and `lastrada-alt` Hosting site. Runtime service accounts,
+IAM bindings, CPU/RAM, scaling, environment variables, origins and the current
+25/200 daily quotas are preserved; only the image and build-identity variables
+change. No API enablement, IAM grant, billing operation, bucket/queue change or
+new infrastructure is part of this path. Existing build/runtime charges apply.
+
+The helper refuses unmarked resources, unexpected limits, public worker access,
+ambiguous traffic splits, a different Firebase app/site/API, or missing permissions. The workflow also requires successful CI for the selected
+application commit and uses the existing repository deployment
+credential without exposing it. It does not create service-account keys or roles.
+The older `hosting` operation remains frontend-only; the instrument evidence
+update requires `redeploy` so both Python services and Hosting use the same source.
+
+Before publishing Hosting, the update checks API version/profile, unsigned-request
+rejection, worker IAM protection and the Hosting-origin CORS preflight. A backend
+failure before Hosting publication restores traffic to the previous revisions.
+Hosting is published last and its public configuration and application assets
+are verified against the selected commit. This is deployment verification;
+interactive Google sign-in and a fresh live audio analysis remain separate checks.
+
+The same helper can run from an already authenticated Cloud Shell checkout:
+
+```bash
+python deploy/redeploy.py --mode inspect --sha FULL_TESTED_APPLICATION_SHA
+python deploy/redeploy.py --mode apply --sha FULL_TESTED_APPLICATION_SHA
+```
+
+The GitHub workflow checks successful CI for the selected application commit. A
+manual Cloud Shell operator must also confirm those checks before `--mode apply`.
+Do not rerun `bootstrap.py` to update this existing stack: it is a provisioning
+path with older defaults for site origins and daily quotas.

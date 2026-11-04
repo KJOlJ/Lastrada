@@ -9,9 +9,20 @@ on:
       - .firebaserc
       - .github/workflows/deploy-firebase-hosting.yml
   workflow_dispatch:
+    inputs:
+      operation:
+        description: "Inspect or redeploy the existing stack; hosting retains the legacy frontend-only action"
+        type: choice
+        options: [inspect, redeploy, hosting]
+        default: inspect
+      app_sha:
+        description: "Full tested application commit from local/stem-fast"
+        type: string
+        default: "48cd02178062408fbdc778ebde040fad56da5a92"
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: firebase-hosting-lastrada-alt
@@ -19,6 +30,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'push' || inputs.operation == 'hosting'
     runs-on: ubuntu-latest
     steps:
       - name: Check out validated frontend
@@ -170,3 +182,65 @@ jobs:
             echo "Testing limits are 25 operations per user and 200 shared operations per UTC day."
             echo "Sony, DTW, Demucs and stored analysis behavior were not changed."
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  existing-stack:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'hosting'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APP_SHA: ${{ inputs.app_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Require the selected branch and successful application checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PYTHON'
+          import json, os, re, subprocess
+          if os.environ['GITHUB_REF'] != 'refs/heads/local/stem-fast':
+              raise SystemExit('Select the local/stem-fast workflow branch.')
+          sha = os.environ['APP_SHA']
+          if not re.fullmatch(r'[a-f0-9]{40}', sha):
+              raise SystemExit('A full application commit SHA is required.')
+          runs = json.loads(subprocess.check_output([
+              'gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/runs?head_sha={sha}&per_page=100'
+          ], text=True))['workflow_runs']
+          for name in ['Synthetic validation', 'Firebase web validation']:
+              candidates = [r for r in runs if r['name'] == name and r['head_sha'] == sha and r['head_branch'] == 'local/stem-fast']
+              latest = max(candidates, key=lambda r: r['id'], default={})
+              if latest.get('conclusion') != 'success' or latest.get('status') != 'completed':
+                  raise SystemExit(f'{name} has not succeeded for the selected application SHA.')
+          print('Validated application source:', sha)
+          PYTHON
+      - name: Use the existing deployment credential
+        env:
+          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LASTRADA_64BAB || secrets.FIREBASE_SERVICE_ACCOUNT || secrets.GCP_SA_KEY || secrets.GOOGLE_CREDENTIALS || secrets.GCP_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_SA}" ]; then
+            echo 'No existing service-account deployment credential is available for the backend.' >&2
+            exit 1
+          fi
+          umask 077
+          printf '%s' "${FIREBASE_SA}" > "${RUNNER_TEMP}/firebase-stack-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/firebase-stack-account.json" >> "${GITHUB_ENV}"
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: lastrada-64bab
+      - name: Authenticate the existing deployment account
+        run: gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" --project=lastrada-64bab
+      - name: Inspect or update existing services and Hosting
+        env:
+          OPERATION: ${{ inputs.operation == 'redeploy' && 'apply' || 'inspect' }}
+        run: python deploy/redeploy.py --mode "${OPERATION}" --sha "${APP_SHA}"
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/firebase-stack-account.json"
