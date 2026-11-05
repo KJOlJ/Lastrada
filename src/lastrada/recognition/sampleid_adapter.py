@@ -28,6 +28,7 @@ class Embeddings:
     values: np.ndarray
     starts: np.ndarray
     ends: np.ndarray
+    hop_seconds: float = 1.0
 
 
 def chunks(audio, seconds=5.0, hop=1.0):
@@ -85,15 +86,17 @@ def _sequence_candidates(
     line_tolerance_windows=1.0,
     max_new_gap=2,
 ):
-    """Find approximately diagonal paths through top-ranked match points."""
+    """Find time-progressing paths without compressing skipped silent windows."""
     points = _rank_points(similarity, top_k, minimum_similarity)
     candidates = []
-    bucket_width = max(1e-6, 2.0 * line_tolerance_windows)
+    bucket_width = max(1e-6, 2.0 * line_tolerance_windows * original.hop_seconds)
 
     for slope in np.arange(slope_min, slope_max + 1e-9, slope_step):
         buckets = defaultdict(list)
         for point in points:
-            intercept = point["source_index"] - slope * point["new_index"]
+            intercept = (
+                original.starts[point["source_index"]] - slope * new.starts[point["new_index"]]
+            )
             bucket = int(round(intercept / bucket_width))
             buckets[bucket].append(point)
 
@@ -103,13 +106,14 @@ def _sequence_candidates(
             current = []
             last_new = None
             for point in bucket_points:
-                if last_new is None or point["new_index"] - last_new <= max_new_gap:
+                new_time = float(new.starts[point["new_index"]])
+                if last_new is None or new_time - last_new <= max_new_gap * new.hop_seconds:
                     current.append(point)
                 else:
                     if current:
                         runs.append(current)
                     current = [point]
-                last_new = point["new_index"]
+                last_new = new_time
             if current:
                 runs.append(current)
 
@@ -123,17 +127,17 @@ def _sequence_candidates(
                 if len(run) < minimum_support:
                     continue
 
-                new_indices = np.asarray(
-                    [point["new_index"] for point in run], dtype=float
+                new_times = np.asarray(
+                    [new.starts[point["new_index"]] for point in run], dtype=float
                 )
-                source_indices = np.asarray(
-                    [point["source_index"] for point in run], dtype=float
+                source_times = np.asarray(
+                    [original.starts[point["source_index"]] for point in run], dtype=float
                 )
-                fitted_slope, fitted_intercept = np.polyfit(
-                    new_indices, source_indices, 1
+                fitted_slope, fitted_intercept = np.polyfit(new_times, source_times, 1)
+                predicted = fitted_slope * new_times + fitted_intercept
+                rmse = (
+                    float(np.sqrt(np.mean((source_times - predicted) ** 2))) / original.hop_seconds
                 )
-                predicted = fitted_slope * new_indices + fitted_intercept
-                rmse = float(np.sqrt(np.mean((source_indices - predicted) ** 2)))
                 if not slope_min <= fitted_slope <= slope_max:
                     continue
                 if rmse > line_tolerance_windows:
@@ -219,6 +223,18 @@ def group_candidates(
     """
     if not -1 <= threshold <= 1 or top_k < 1 or minimum_support < 2:
         raise ValueError("Invalid SampleID candidate configuration")
+    for embeddings in (original, new):
+        if not np.isfinite(embeddings.hop_seconds) or embeddings.hop_seconds <= 0:
+            raise ValueError("Embedding window hop must be finite and positive")
+        if (
+            len(embeddings.values) != len(embeddings.starts)
+            or len(embeddings.starts) != len(embeddings.ends)
+            or not np.isfinite(embeddings.starts).all()
+            or not np.isfinite(embeddings.ends).all()
+            or np.any(np.diff(embeddings.starts) <= 0)
+            or np.any(embeddings.ends <= embeddings.starts)
+        ):
+            raise ValueError("Embedding timestamps must be finite, ordered, positive intervals")
     if not len(original.values) or not len(new.values):
         return []
 
@@ -368,10 +384,10 @@ class SampleIDAdapter:
         cached = self.cache_dir / f"{key}.npz"
         if cached.is_file():
             with np.load(cached, allow_pickle=False) as data:
-                return Embeddings(data["values"], data["starts"], data["ends"])
+                return Embeddings(data["values"], data["starts"], data["ends"], hop_seconds=hop)
         pieces, starts, ends = chunks(audio, seconds, hop)
         if not pieces:
-            return Embeddings(np.empty((0, 0)), starts, ends)
+            return Embeddings(np.empty((0, 0)), starts, ends, hop_seconds=hop)
         import torch
 
         model = self._load()
@@ -390,7 +406,7 @@ class SampleIDAdapter:
         with temporary.open("wb") as file:
             np.savez_compressed(file, values=values, starts=starts, ends=ends)
         temporary.replace(cached)
-        return Embeddings(values, starts, ends)
+        return Embeddings(values, starts, ends, hop_seconds=hop)
 
     def match(self, original, new, threshold=0.8, seconds=5.0, hop=1.0):
         return group_candidates(
