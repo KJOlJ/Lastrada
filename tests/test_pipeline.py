@@ -60,6 +60,45 @@ def test_candidate_not_probability(intake):
     assert result.master.locate.sample_detected is None
 
 
+@pytest.mark.parametrize("chunk_seconds,refined", [(1, False), (5, True)])
+def test_direct_search_respects_embedding_window_uncertainty(intake, chunk_seconds, refined):
+    import numpy as np
+    from lastrada.audio.io import Audio
+    from lastrada.config import Settings
+
+    sr = 8000
+    source = np.random.default_rng(480).normal(0, 0.2, 4 * sr).astype(np.float32)
+    target = np.zeros(12 * sr, dtype=np.float32)
+    target[int(2.75 * sr) : int(6.75 * sr)] = source
+    coarse = Interval(
+        new_start=0,
+        new_end=10,
+        original_start=0,
+        original_end=4,
+        source="sampleid_rank_sequence",
+        status="candidate",
+    )
+
+    class Adapter:
+        def match(self, *args, **kwargs):
+            return [coarse]
+
+    result = analyze_pair(
+        intake,
+        Audio(source, sr, 4),
+        Audio(target, sr, 12),
+        adapter=Adapter(),
+        settings=Settings(sampleid_chunk_seconds=chunk_seconds, dtw_enabled=False, iterations=10),
+    )
+    interval = result.master.locate.sample_occurrences[0]
+    if refined:
+        assert interval.source == "direct_waveform_local_alignment"
+        assert (interval.new_start, interval.new_end) == pytest.approx((2.75, 6.75))
+    else:
+        assert interval == coarse
+    assert result.master.locate.sample_detected is None
+
+
 def test_placement_abstains_without_sections():
     result = classify(25, [Interval(new_start=1, new_end=2, source="test")])
     assert result.placement is None

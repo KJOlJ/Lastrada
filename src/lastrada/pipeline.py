@@ -287,8 +287,12 @@ def analyze_pair(
 
                 for candidate in candidates:
                     # First prefer direct waveform correlation when the recording
-                    # material is nearly unchanged.
-                    direct = refine_candidate(original, new, candidate)
+                    # material is nearly unchanged. A coarse embedding window can
+                    # lead the actual copy by up to its own length; search that
+                    # bounded uncertainty instead of only one second.
+                    direct = refine_candidate(
+                        original, new, candidate, radius=settings.sampleid_chunk_seconds
+                    )
                     if direct.source == "direct_waveform_local_alignment":
                         refined_candidates.append(direct)
                         continue

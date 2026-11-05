@@ -56,7 +56,7 @@ def test_invalid_audio():
         decode(b"")
 
 
-def test_waveform_refinement_does_not_expand_to_unmatched_region():
+def test_waveform_refinement_covers_the_contiguous_verified_copy():
     original, new, _ = demo_pair()
     coarse = Interval(
         new_start=1.8,
@@ -69,7 +69,8 @@ def test_waveform_refinement_does_not_expand_to_unmatched_region():
     refined = refine_candidate(original, new, coarse)
     assert refined.source == "direct_waveform_local_alignment"
     assert abs(refined.new_start - 2) < 0.02
-    assert refined.new_end - refined.new_start == pytest.approx(2)
+    # The generated source is copied for four seconds, then an unmatched gap.
+    assert refined.new_end - refined.new_start == pytest.approx(4)
     assert refined.status == "candidate"
 
 
