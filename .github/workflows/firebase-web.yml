@@ -6,7 +6,7 @@ on:
     paths: ['run-local.py', 'Start-Lastrada.cmd', 'Start-Lastrada.command', 'web/**', 'configs/**', 'deploy/**', 'src/lastrada/**', 'tests/**', 'pyproject.toml', 'firebase.json', '.github/workflows/firebase-web.yml']
 jobs:
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
