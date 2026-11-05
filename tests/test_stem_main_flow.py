@@ -35,9 +35,9 @@ def _comparison(
 def _candidate(index=0, source="sampleid_rank_sequence"):
     return Interval(
         new_start=10.0 + index,
-        new_end=20.0 + index,
+        new_end=18.0 + index,
         original_start=30.0 + index,
-        original_end=40.0 + index,
+        original_end=38.0 + index,
         source=source,
         status="candidate",
         similarity=0.91,

@@ -42,6 +42,8 @@ class StemComparisonResult:
     source_region: object
     derivative_region: object
     evidence: list[StemPairEvidence]
+    probe: Interval | None = None
+    partial: bool = False
 
     @property
     def accepted(self) -> list[StemPairEvidence]:
@@ -100,6 +102,31 @@ def candidate_stem_pairs(
     return ordered
 
 
+def bounded_stem_probe(interval, maximum=8.0):
+    """Take a centered paired fraction; never expand or re-label the match."""
+    if interval.original_start is None or interval.original_end is None:
+        raise ValueError("Stem comparison requires source timestamps")
+    if not 0 < maximum <= 8:
+        raise ValueError("Stem probes must be at most eight seconds")
+    widths = [interval.new_end - interval.new_start, interval.original_end - interval.original_start]
+    fraction = min(1.0, maximum / max(widths))
+    values = interval.model_dump()
+    values.update(end_review=None, ending_review_context=None)
+    for prefix, width in zip(("new", "original"), widths):
+        start, end = getattr(interval, prefix + "_start"), getattr(interval, prefix + "_end")
+        left = start + (width - width * fraction) / 2
+        values[prefix + "_start"] = left
+        values[prefix + "_end"] = end if fraction == 1 else left + width * fraction
+    return Interval.model_validate(values)
+
+
+def probe_is_partial(probe, interval):
+    return any(
+        getattr(probe, key) != getattr(interval, key)
+        for key in ("new_start", "new_end", "original_start", "original_end")
+    )
+
+
 def compare_candidate_stems(
     original,
     new,
@@ -115,9 +142,11 @@ def compare_candidate_stems(
     include_cross_other: bool = True,
     parallel_separation: bool = False,
 ) -> StemComparisonResult:
-    """Separate both candidate regions and run guarded DTW on selected stem pairs."""
+    """Compare bounded paired crops; return their exact scope with the evidence."""
     if interval.original_start is None or interval.original_end is None:
         raise ValueError("Stem comparison requires source timestamps")
+    candidate = interval
+    interval = bounded_stem_probe(candidate)
 
     def separate(audio, start, end):
         return separator.separate_region(audio, start, end, padding_seconds=separation_padding)
@@ -199,4 +228,7 @@ def compare_candidate_stems(
             item.derivative_stem,
         )
     )
-    return StemComparisonResult(source_region, derivative_region, evidence)
+    return StemComparisonResult(
+        source_region, derivative_region, evidence,
+        probe=interval, partial=probe_is_partial(interval, candidate),
+    )

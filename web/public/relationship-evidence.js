@@ -145,6 +145,11 @@ export function summarizeRelationshipEvidence(family, rows = []) {
     failed,
     tooShort,
     noSource,
+    partialRows: checkedRows.filter(row => !row.context_only && row.probe &&
+      ["new", "original"].some(prefix =>
+        row.probe[`${prefix}_start`] > row.interval[`${prefix}_start`] + 1e-6 ||
+        row.probe[`${prefix}_end`] < row.interval[`${prefix}_end`] - 1e-6,
+      )),
     entries,
   };
 }
@@ -193,7 +198,12 @@ function evidenceHtml(family) {
     summary.noSource ? `${summary.noSource} missing original time` : "",
     summary.pending ? `${summary.pending} pending` : "",
   ].filter(Boolean);
-  return `${body}${presenceHtml(rowsForRelationship(family, latestInstrumentRows))}<small class="evidenceProgress">${esc(progress)}${exclusions.length ? ` · ${esc(exclusions.join(" · "))}` : ""}</small>`;
+  const portions = summary.partialRows.length
+    ? `<details class="checkedPortions"><summary>Instrument evidence covers only the checked portions.</summary>${summary.partialRows.map(row =>
+      `<small>Your track: ${Number(row.probe.new_start).toFixed(2)}–${Number(row.probe.new_end).toFixed(2)} s · Original: ${Number(row.probe.original_start).toFixed(2)}–${Number(row.probe.original_end).toFixed(2)} s</small>`,
+    ).join("")}</details>`
+    : "";
+  return `${body}${portions}${presenceHtml(rowsForRelationship(family, latestInstrumentRows))}<small class="evidenceProgress">${esc(progress)}${exclusions.length ? ` · ${esc(exclusions.join(" · "))}` : ""}</small>`;
 }
 
 function readNumber(cell) {

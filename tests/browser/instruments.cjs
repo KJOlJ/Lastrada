@@ -4,6 +4,7 @@ const path = require("path");
 for (const scenario of [
   "success",
   "short_context",
+  "bounded",
   "worker_failure",
   "download_failure",
   "quota",

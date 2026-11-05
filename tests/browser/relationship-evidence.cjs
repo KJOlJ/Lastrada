@@ -73,6 +73,9 @@ const { pathToFileURL } = require("url");
   assert.strictEqual(summary.entries[0].momentCount, 2);
   assert(Math.abs(summary.entries[0].durationRatio - 1.01) < 0.001);
   assert.strictEqual(summary.entries[1].result, "weak");
+  assert.strictEqual(summary.partialRows.length, 0);
+  rows[0].probe = { ...rows[0].interval, new_end: 14, original_end: 46 };
+  assert.strictEqual(module.summarizeRelationshipEvidence(family, rows).partialRows.length, 1);
 
   const pending = module.summarizeRelationshipEvidence(family, [
     {
@@ -92,6 +95,7 @@ const { pathToFileURL } = require("url");
   assert.strictEqual(mixed.checkedMomentCount, 2);
   assert.strictEqual(mixed.durationRatio, 1.04);
   rows[0].context_only = true;
+  assert.strictEqual(module.summarizeRelationshipEvidence(family, rows).partialRows.length, 0);
   assert(!module.summarizeRelationshipEvidence(family, rows).entries.some(e => e.result === "accepted"));
   rows[1].evidence = [];
   assert.strictEqual(module.summarizeRelationshipEvidence(family, rows).entries.length, 0,

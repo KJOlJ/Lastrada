@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from time import monotonic
 
-from lastrada.alignment.stems import compare_candidate_stems
+from lastrada.alignment.stems import compare_candidate_stems, probe_is_partial
 from lastrada.pipeline import _stem_evidence_records
 from lastrada.reporting.suggestions import suggested_intervals
 from lastrada.schemas.models import InstrumentOccurrence
@@ -189,6 +189,7 @@ def run_occurrence_instruments(
                 include_cross_other=False,
                 parallel_separation=parallel_separation,
             )
+            comparison.partial = probe_is_partial(row.probe, row.interval)
             row.evidence = _stem_evidence_records([comparison])
             row.source_sounds = describe_region(
                 getattr(comparison, "source_region", None),
@@ -248,7 +249,9 @@ def record_initial_comparisons(result, candidates, updated, comparisons, setting
         if before.original_start is not None and before.original_end is not None
     ]
     rows = []
-    for (index, probe, interval), comparison in zip(eligible, comparisons, strict=True):
+    for (index, before, interval), comparison in zip(eligible, comparisons, strict=True):
+        probe = getattr(comparison, "probe", None) or before
+        presence_interval = probe if getattr(comparison, "partial", False) else interval
         evidence = _stem_evidence_records([comparison])
         for item in evidence:
             item.candidate_number = index + 1
@@ -279,17 +282,21 @@ def record_initial_comparisons(result, candidates, updated, comparisons, setting
                 status="pending" if too_short else "checked",
                 source_sounds=describe_region(
                     getattr(comparison, "source_region", None),
-                    interval.original_start,
-                    interval.original_end,
+                    presence_interval.original_start,
+                    presence_interval.original_end,
                 ),
                 new_sounds=describe_region(
                     getattr(comparison, "derivative_region", None),
-                    interval.new_start,
-                    interval.new_end,
+                    presence_interval.new_start,
+                    presence_interval.new_end,
                 ),
                 evidence=evidence,
                 suggested_instruments=labels,
-                reason="Initial fast-profile comparison; confirm estimates by listening.",
+                reason=(
+                    "Initial comparison covers only the checked portion, not the full interval."
+                    if getattr(comparison, "partial", False)
+                    else "Initial fast-profile comparison; confirm estimates by listening."
+                ),
             )
         )
     result.instrument_occurrences = rows

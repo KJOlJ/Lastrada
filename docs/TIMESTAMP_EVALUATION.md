@@ -268,6 +268,50 @@ separate raw evidence; Python serialization tests cover a second save after
 editing beyond both reference points. This is a persistence correction, with no
 new numerical predictions, model inference, deployment or historical rescore.
 
+## Instrument probe validity and resource bounds
+
+Independent review found two downstream interactions with the extended/shortened
+direct matches. First, a 1.5-second cued interval expanded to a four-second
+instrument context crop while retaining the original ending cue. That made the
+saved probe violate the interval invariant and caused result reads to return
+HTTP 400, including after a failed separation. The regression reproduced both
+outcomes through the actual queued worker and API persistence path. Derived
+context probes now clear their own review metadata and validate before use; the
+sample interval, ending cue and saved listening context are preserved.
+
+Second, an identical 600-second input can yield a valid full-length direct match,
+which was passed unbounded into initial stem separation and quadratic DTW. The
+old call boundary was reproduced with a spy, without allocating the unsafe DTW
+matrices. The reported out-of-memory concern is a calculated risk, not an observed
+worker crash. Initial stem checks now use a centered paired fraction of at most
+eight seconds in each track, preserving the paired duration ratio. The comparison
+entry point also enforces this limit. Existing bounded padding remains in effect
+(four seconds per side in the web profile). Full direct-waveform/full-mix matches
+stay intact. A coarse interval longer than its probe also stays coarse; a partial
+comparison cannot establish its full endpoints.
+
+Stored instrument rows retain the full interval and the actual checked probe
+separately. Bounded evidence is labeled as covering the checked portion, estimated
+sound ranges stay within that portion, and the relationship table exposes the
+checked times without changing the existing review steps. This limits instrument
+claims to a short portion and does not prove instrumentation throughout a long
+match. The numerical direct-waveform refiner itself is unchanged.
+
+A deterministic 600-second identical-copy control retained 0–600 seconds in both
+tracks. With separation replaced by a deterministic crop provider and real DTW,
+the initial stage used eight-second probes, 16-second padded crops and observed
+247×497 cost matrices. The corresponding cost/accumulated/back arrays together
+occupy about 2 MiB, not a measurement of total worker or Demucs memory. No full
+600-second Demucs/DTW inference or live deployment was run.
+
+Validation passed 227 Python tests, Ruff, JavaScript syntax, synthetic smoke,
+the standard browser suite (including automatic launch and five ending-review
+flows), and ten instrument scenarios including bounded-portion display. The
+worker/API regression validates every persisted snapshot and reads results,
+saves review, and exports JSON/HTML/text after both successful and failed checks.
+Previously saved invalid experimental probes are not migrated automatically;
+the fix prevents new invalid probes while keeping the interval invariant strict.
+
 ## Larger corpus protocol
 
 1. Place archives and the supplied manifest under ignored `data/private/` or an

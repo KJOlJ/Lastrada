@@ -4,7 +4,7 @@ from time import perf_counter
 
 from lastrada.alignment.dtw import refine_candidate_dtw
 from lastrada.alignment.local import refine_candidate
-from lastrada.alignment.stems import compare_candidate_stems
+from lastrada.alignment.stems import bounded_stem_probe, compare_candidate_stems, probe_is_partial
 from lastrada.config import Settings
 from lastrada.master.analyze import analyze as analyze_master
 from lastrada.measurement.pfnmf import measure
@@ -61,7 +61,9 @@ def _stem_evidence_records(comparisons):
                     new_song_stem=item.derivative_stem,
                     dtw_result=verdict,
                     duration_ratio=item.duration_ratio,
-                    interpretation=_stem_interpretation(item, verdict),
+                    interpretation=(
+                        "Checked portion only; " if getattr(comparison, "partial", False) else ""
+                    ) + _stem_interpretation(item, verdict),
                     reason=item.reason or "No additional DTW detail",
                     mean_dtw_cost=item.mean_dtw_cost,
                     pitch_shift_semitones=item.pitch_shift_semitones,
@@ -83,8 +85,9 @@ def stem_assist_candidates(original, new, candidates, separator, settings):
     """Run Demucs + guarded DTW on the strongest paired candidates.
 
     Stem evidence is a second-stage validation layer. It only replaces the
-    review timing when the current interval is still a coarse Sony candidate;
-    an existing direct-waveform or full-mix DTW refinement is preserved.
+    review timing when the entire current interval is a coarse Sony candidate
+    covered by the probe; existing direct-waveform/full-mix refinements and
+    longer candidates are preserved. Each paired probe is at most eight seconds.
     """
     updated = list(candidates)
     comparisons = []
@@ -93,10 +96,11 @@ def stem_assist_candidates(original, new, candidates, separator, settings):
         if candidate.original_start is None or candidate.original_end is None:
             continue
 
+        probe = bounded_stem_probe(candidate, min(8.0, settings.stem_probe_seconds))
         comparison = compare_candidate_stems(
             original,
             new,
-            candidate,
+            probe,
             separator,
             separation_padding=settings.stem_separation_padding_seconds,
             dtw_search_padding=min(
@@ -109,6 +113,8 @@ def stem_assist_candidates(original, new, candidates, separator, settings):
             minimum_duration=settings.dtw_minimum_duration_seconds,
             include_cross_other=settings.stem_include_cross_other,
         )
+        comparison.probe = probe
+        comparison.partial = probe_is_partial(probe, candidate)
         comparisons.append(comparison)
 
         best = _best_separated_stem_evidence(comparison)
@@ -116,9 +122,9 @@ def stem_assist_candidates(original, new, candidates, separator, settings):
             continue
 
         # Do not displace a stronger full-mix refinement. Stem evidence is used
-        # to refine a still-coarse Sony interval, while all results remain
-        # candidate evidence requiring listening review.
-        if candidate.source not in {
+        # to refine a fully checked, still-coarse Sony interval. A short probe
+        # cannot set the endpoints of a longer match. All results need review.
+        if comparison.partial or candidate.source not in {
             "sampleid_rank_sequence",
             "sampleid_chunk_cosine",
         }:
@@ -394,13 +400,7 @@ def short_stem_candidate(candidates, seconds=8.0):
     if not eligible:
         return None
     candidate = max(eligible, key=lambda i: i.similarity if i.similarity is not None else -2)
-    updates = {}
-    for start, end in [("new_start", "new_end"), ("original_start", "original_end")]:
-        left, right = getattr(candidate, start), getattr(candidate, end)
-        duration = min(seconds, right - left)
-        updates[start] = (left + right - duration) / 2
-        updates[end] = updates[start] + duration
-    return candidate.model_copy(update=updates)
+    return bounded_stem_probe(candidate, min(8.0, seconds))
 
 
 def run_stem_probe(result, original, new, settings):

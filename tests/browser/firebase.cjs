@@ -48,6 +48,11 @@ function python(mode, body) {
       interval.new_end = 1.4;
       interval.original_end = 2.4;
     }
+    if (instrumentScenario === "bounded") {
+      interval.new_end = 19;
+      interval.original_start = 0;
+      interval.original_end = 18;
+    }
     data.analysis.master.locate.sample_occurrences = [interval];
     data.suggestions.master.intervals = [interval];
     data.instrument_rows = [
@@ -282,6 +287,12 @@ function python(mode, body) {
               data.instrument_rows[0].probe = {
                 ...data.instrument_rows[0].interval,
               };
+              if (instrumentScenario === "bounded") {
+                data.instrument_rows[0].probe = {
+                  ...data.instrument_rows[0].interval,
+                  new_start: 6, new_end: 14, original_start: 5, original_end: 13,
+                };
+              }
               if (instrumentScenario === "success") {
                 data.instrument_rows[1] = {
                   ...data.instrument_rows[1],
@@ -510,6 +521,16 @@ function python(mode, body) {
               throw Error("Short-clip source and new-mix estimates were lost or conflated");
             if (await p.locator("[data-stem-dtw-evidence] .dtwResult.accepted").count())
               throw Error("Context-only match shown as support for the tiny interval");
+          }
+          if (instrumentScenario === "bounded") {
+            const portions = p.locator("[data-stem-dtw-evidence] .checkedPortions");
+            await portions.locator("summary").click();
+            const text = await portions.innerText();
+            if (!text.includes("only the checked portions") || !text.includes("6.00–14.00")
+              || !text.includes("5.00–13.00"))
+              throw Error("Bounded stem evidence lost its actual checked times");
+            if (!(await master.locator(".groupedUseTable").innerText()).includes("0:19.0"))
+              throw Error("A bounded stem check truncated the reported match");
           }
           if (instrumentScenario === "success") {
             const rows = p
