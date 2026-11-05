@@ -198,7 +198,7 @@ function evidenceHtml(family) {
 
 function readNumber(cell) {
   const input = cell?.querySelector('input[type="number"]');
-  const raw = input ? input.value : cell?.textContent?.trim();
+  const raw = input ? input.value : (cell?.dataset?.timeValue ?? cell?.textContent?.trim());
   if (!raw || /not located/i.test(raw)) return null;
   const value = Number(raw);
   return Number.isFinite(value) ? value : null;

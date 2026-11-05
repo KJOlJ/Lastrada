@@ -51,6 +51,12 @@ def comparison_figure(original_view, new_view, intervals, dark=True):
             if interval.status == "expert_verified"
             else "Suggested moment — check by listening"
         )
+        if interval.end_review is not None:
+            label += (
+                "<br>Ending unclear: quiet or masked audio may continue. Listen through "
+                f"{timestamp(interval.end_review.new_through)} in your track and "
+                f"{timestamp(interval.end_review.original_through)} in the original."
+            )
         hover = f"Moment {number}<br>Your track: {new_range}<br>Original: {source_range}<br>{label}<extra></extra>"
         for row, start, end in [
             (2, interval.new_start, interval.new_end),

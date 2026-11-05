@@ -92,3 +92,23 @@ def test_unconfirmed_description_prefill_is_not_marked_expert_verified(example):
     payload.reviewer = "Test"
     with pytest.raises(ValueError):
         apply_review(example, payload)
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_ending_cue_is_preserved_as_evidence_and_resolved_by_existing_review(example, confirmed):
+    interval = Interval(
+        new_start=2, new_end=3.5, original_start=1, original_end=2.5,
+        source="direct_waveform_local_alignment", status="candidate",
+        end_review={"new_through": 4, "original_through": 3},
+    )
+    example.master.locate.sample_occurrences = [interval]
+    answer = complete()
+    answer.intervals = [interval]
+    answer.times_confirmed = confirmed
+    result = apply_review(example, ReviewPayload(
+        paths={"master": answer, "publishing": UseReview(status="no_use")}
+    ))
+    assert result.master.locate.sample_occurrences[0].end_review == interval.end_review
+    corrected = result.review.corrected["master"]["locate"]["sample_occurrences"][0]
+    assert (corrected["end_review"] is None) == confirmed
+    assert corrected["new_end"] == 3.5

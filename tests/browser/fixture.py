@@ -24,6 +24,14 @@ def initial():
     analysis.master.locate.measurement_intervals = [
         Interval(new_start=1, new_end=4, source="pfnmf")
     ]
+    if os.getenv("LASTRADA_BROWSER_ENDING"):
+        analysis.master.locate.sample_occurrences = [
+            Interval(
+                new_start=1, new_end=2.5, original_start=2, original_end=3.5,
+                source="direct_waveform_local_alignment", status="candidate",
+                end_review={"new_through": 3, "original_through": 4},
+            )
+        ]
     if os.getenv("LASTRADA_BROWSER_ANALYSIS"):
         analysis = Analysis.model_validate_json(
             Path(os.environ["LASTRADA_BROWSER_ANALYSIS"]).read_text()

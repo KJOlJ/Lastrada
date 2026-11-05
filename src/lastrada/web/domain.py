@@ -87,6 +87,7 @@ def apply_review(analysis: Analysis, payload: ReviewPayload):
                         if answer.times_confirmed
                         else "unconfirmed_timing_suggestion",
                         "status": "expert_verified" if answer.times_confirmed else "estimated",
+                        "end_review": None if answer.times_confirmed else i.end_review,
                     }
                 )
                 for i in answer.intervals

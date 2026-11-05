@@ -34,6 +34,7 @@ function python(mode, body) {
     operation = "analyze",
     jobError = null;
   const instrumentScenario = process.env.LASTRADA_BROWSER_STEMS;
+  const endingScenario = process.env.LASTRADA_BROWSER_ENDING;
   if (instrumentScenario && instrumentScenario !== "no_source") {
     const interval = {
       new_start: 1,
@@ -350,7 +351,31 @@ function python(mode, body) {
     }
     const master = p.locator('[data-rights="master"]').first(),
       publishing = p.locator('[data-rights="publishing"]').first();
+    if (endingScenario) {
+      const cue = master.locator("[data-ending-review-summary]");
+      await cue.waitFor({ state: "visible" });
+      if (!(await cue.textContent()).includes("0:03.00 in your track and 0:04.00"))
+        throw Error("Ending review extent missing from visible grouped table");
+      if (!(await master.locator(".groupedUseTable").textContent()).includes("≈ 0:02.5"))
+        throw Error("Grouped ending should be approximate without losing its numeric value");
+      if (!(await master.locator(".groupedUseTable").textContent()).includes("≈ 0:03.5"))
+        throw Error("Original ending lost its uncertainty cue");
+      if ((await master.locator(".groupedUseTable tbody tr").count()) !== 1)
+        throw Error("Ending cue changed sample grouping");
+      if (process.env.LASTRADA_BROWSER_OUTPUT) {
+        fs.mkdirSync(process.env.LASTRADA_BROWSER_OUTPUT, { recursive: true });
+        await p.screenshot({ path: path.join(process.env.LASTRADA_BROWSER_OUTPUT, "ending-review.png"), fullPage: true });
+      }
+      if (endingScenario === "edit") {
+        await master.locator("[data-times]").selectOption("edit");
+        await master.locator('[data-interval="0:new_end"]').fill("2.6");
+        if (await master.locator("[data-ending-review]").count())
+          throw Error("Edited times retained a stale automated ending cue");
+      }
+    }
     await master.locator("[data-times]").selectOption("accept");
+    if (endingScenario && await master.locator("[data-ending-review]").count())
+      throw Error("Existing confirmation did not resolve the ending cue");
     await p
       .getByRole("button", { name: "Next: Describe the sound →", exact: true })
       .click();
@@ -646,6 +671,15 @@ function python(mode, body) {
       .getByRole("heading", { name: "Listen & check.", exact: true })
       .waitFor();
     if (!approved) throw Error("Backend review was not approved");
+    if (endingScenario) {
+      if (!data.analysis.master.locate.sample_occurrences[0].end_review)
+        throw Error("Review erased automated ending uncertainty from saved evidence");
+      const corrected = data.analysis.review.corrected.master.locate.sample_occurrences[0];
+      if (corrected.end_review)
+        throw Error("Confirmed times retained an unresolved automated cue");
+      if (corrected.new_end !== (endingScenario === "edit" ? 2.6 : 2.5))
+        throw Error("Ending cue overwrote the reviewer's chosen time");
+    }
     if (errors.length) throw Error(errors.join("; "));
     if (
       !data.analysis.review.corrected.nature_of_use.text.includes("throughout")
@@ -654,7 +688,7 @@ function python(mode, body) {
     console.log(
       "Firebase web browser flow passed: mocked Google sign-in, filename prefill, private-upload contract, timestamps, no-replay skip, sound/placement review, real Python review validation, final document controls. API requests:",
       requests,
-      instrumentScenario || "base",
+      instrumentScenario || endingScenario || "base",
     );
   } finally {
     await b.close();

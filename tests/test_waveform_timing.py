@@ -36,6 +36,7 @@ def test_direct_alignment_recovers_long_copy_end_in_a_mix(length, sr):
     assert result.original_start == 1
     assert result.original_end == pytest.approx(1 + length)
     assert result.status == "candidate"
+    assert result.end_review is None
 
 
 @pytest.mark.parametrize("length", [1.25, 1.5, 1.75])
@@ -47,6 +48,8 @@ def test_short_copy_does_not_claim_the_whole_two_second_anchor(length, sr):
     assert (result.new_start, result.new_end) == pytest.approx((2.75, 2.75 + length))
     assert (result.original_start, result.original_end) == pytest.approx((1, 1 + length))
     assert result.status == "candidate"
+    assert result.end_review.new_through == pytest.approx(4.75)
+    assert result.end_review.original_through == pytest.approx(3)
 
 
 def test_brief_weak_anchor_block_does_not_truncate_a_longer_copy():
@@ -88,6 +91,49 @@ def test_short_source_window_can_still_be_refined():
     result = refine_candidate(source, target, coarse)
     assert result.source == "direct_waveform_local_alignment"
     assert result.new_end == pytest.approx(3.25)
+    assert result.end_review is None
+
+
+@pytest.mark.parametrize("tail", [0.25, 0.5])
+@pytest.mark.parametrize("gain", [0, 0.01, 0.03])
+def test_absent_and_obscured_tails_both_expose_ending_uncertainty(tail, gain):
+    source, target, coarse = fixture(2)
+    sr = source.sample_rate
+    start = int((2.75 + 2 - tail) * sr)
+    end = int(4.75 * sr)
+    copied_tail = source.samples[int((3 - tail) * sr) : 3 * sr]
+    target.samples[start:end] -= (1 - gain) * copied_tail
+    result = refine_candidate(source, target, coarse)
+    assert result.source == "direct_waveform_local_alignment"
+    # The same estimate can mean an absent tail or a real but obscured tail.
+    # Neither gets an unqualified endpoint or a claim of verified reuse.
+    assert result.new_end == pytest.approx(4.75 - tail)
+    assert result.end_review.new_through == pytest.approx(4.75)
+    assert result.end_review.original_through == pytest.approx(3)
+    assert result.status == "candidate"
+    assert Interval.model_validate_json(result.model_dump_json()) == result
+
+
+def test_unrelated_audio_does_not_gain_an_uncertainty_match():
+    source, target, coarse = fixture(0)
+    result = refine_candidate(source, target, coarse)
+    assert result == coarse
+    assert result.end_review is None
+
+
+def test_legacy_interval_has_no_ending_cue():
+    interval = Interval.model_validate({"new_start": 1, "new_end": 2, "source": "old"})
+    assert interval.end_review is None
+
+
+def test_ending_review_extent_must_follow_both_endpoints():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="Ending review must extend"):
+        Interval(
+            new_start=1, new_end=2, original_start=3, original_end=4, source="test",
+            end_review={"new_through": 1.5, "original_through": 5},
+        )
 
 
 def test_a_gap_stops_extension_even_if_later_blocks_match():

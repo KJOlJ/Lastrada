@@ -51,6 +51,14 @@ class Intake(StrictModel):
         return self
 
 
+class EndReview(StrictModel):
+    """Listening extent for an ambiguous ending, not a statistical confidence bound."""
+
+    new_through: float = Field(gt=0)
+    original_through: float = Field(gt=0)
+    reason: Literal["quiet_or_obscured_tail"] = "quiet_or_obscured_tail"
+
+
 class Interval(StrictModel):
     new_start: float = Field(ge=0)
     new_end: float = Field(gt=0)
@@ -60,6 +68,7 @@ class Interval(StrictModel):
     element_id: str | None = None
     status: Literal["estimated", "candidate", "expert_verified"] = "estimated"
     similarity: float | None = Field(default=None, ge=-1, le=1)
+    end_review: EndReview | None = None
 
     @model_validator(mode="after")
     def ordered(self):
@@ -69,6 +78,12 @@ class Interval(StrictModel):
             raise ValueError("Source endpoints must both be supplied or both be unknown")
         if self.original_start is not None and self.original_end <= self.original_start:
             raise ValueError("Original end must be after start")
+        if self.end_review is not None and (
+            self.original_end is None
+            or self.end_review.new_through <= self.new_end
+            or self.end_review.original_through <= self.original_end
+        ):
+            raise ValueError("Ending review must extend beyond both suggested endpoints")
         return self
 
 

@@ -340,3 +340,9 @@ footer {
 }
 
 .instrumentTable { max-height: 480px; }
+.endingReview {
+  display: block;
+  max-width: 28rem;
+  margin-top: .35rem;
+  line-height: 1.4;
+}

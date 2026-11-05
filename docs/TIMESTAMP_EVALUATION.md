@@ -162,6 +162,54 @@ instrument evidence with real Python review validation. No model inference or
 live deployment was rerun for this follow-up.
 The full corpus is still unavailable in this executor, and 3/22 remains unrescored.
 
+## Obscured-tail uncertainty
+
+Independent follow-up controls found that `ed1981e` can trim a genuinely copied
+ending when it is attenuated and obscured by another sound. A weak correlation
+does not establish that the copied sound stopped. The next change therefore
+preserves numeric estimates and acceptance decisions while adding `end_review`
+to every shortened anchor: the untrimmed paired anchor endpoints and the reason
+`quiet_or_obscured_tail`. These are listening extents, not a confidence interval,
+verified continuation, or a guarantee that the true end falls inside that range.
+Unchanged long matches, clean anchors and rejected candidates get no cue.
+
+The Firebase listening table marks affected endpoints as approximate and says
+"Ending unclear" with the time to listen through in each track. The cue stays
+visible in the grouped relationship table, and numeric data attributes preserve
+grouping and instrument-evidence matching. Existing time confirmation resolves
+the cue; editing clears it from the form. No extra confirmation step is added.
+Raw automated JSON retains the note separately from reviewed times, and the
+spectral hover explains it too. Legacy intervals without the field still load.
+
+The local investigation used 360 matched tail cases from the same 12 recordings:
+two-second copies, final 0.25/0.5-second tails, gains 1/0.1/0.03/0.01/0, and three
+levels of seeded independent background noise. Gain zero represents a genuinely
+shorter copy; nonzero gains retain a real copied tail. A provisional 0.1 suffix
+correlation guard would preserve only 60 of 128 obscured tails that were trimmed.
+A looser 0.05 guard would preserve 90, but also retain three genuinely absent
+tails. Neither guard was added to production code.
+
+| Cue check versus `ed1981e` | Result |
+|---|---:|
+| Numeric predictions and acceptance decisions unchanged | 360/360 |
+| Accepted matches | 338/360 in both versions |
+| Shortened obscured tails flagged | 128/128 |
+| Genuine short copies also flagged | 66/66 accepted |
+| Clean full-copy cases with a cue | 0/72 |
+| Additional noise/silence/reversal/ambiguous-lag controls refined | 0/48 in both versions |
+
+This makes uncertainty explicit; it does not improve point-estimate accuracy or
+automatically recover an obscured tail. Short-copy gains remain numerically
+unchanged. The cost is a listening note even when the short endpoint is correct.
+The tests are manufactured controls within known recordings, not a new historical
+accuracy score. The expanded corpus remains unavailable here and 3/22 is unrescored.
+
+Validation passed 211 Python tests, Ruff, JavaScript syntax, synthetic smoke,
+the standard browser suite, both ending accept/edit flows and all nine instrument
+scenarios. Browser identity, cloud transport and instrument evidence are simulated;
+Python review and document validation are real. No new model inference or live
+deployment was performed. No changes have been pushed or deployed.
+
 ## Larger corpus protocol
 
 1. Place archives and the supplied manifest under ignored `data/private/` or an

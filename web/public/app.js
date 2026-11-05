@@ -417,9 +417,21 @@ function name(r) {
     ? "Your recording sample"
     : "Your replayed melody / lyrics";
 }
+function endingReviewNote(interval, confirmed = false) {
+  const review = interval.end_review;
+  if (!review || confirmed) return "";
+  return `<small class="endingReview" data-ending-review>Ending unclear—quiet or masked audio may continue. Listen through ${esc(formatTime(review.new_through))} in your track and ${esc(formatTime(review.original_through))} in the original before confirming.</small>`;
+}
+function renderTimeCell(interval, key, row, form) {
+  const uncertain = interval.end_review && !form.times_confirmed && key.endsWith("_end");
+  const value = form.edit
+    ? `<input type="number" min="0" step=".01" data-interval="${row}:${key}" value="${interval[key] ?? ""}" aria-label="${key}">`
+    : `${uncertain ? "≈ " : ""}${esc(interval[key] ?? "Not located")}`;
+  return `<td data-time-value="${esc(interval[key] ?? "")}">${value}${key === "new_end" ? endingReviewNote(interval, form.times_confirmed) : ""}</td>`;
+}
 function renderTimes(r, nested = false) {
   const f = forms[r];
-  return `<div class="track" data-rights="${r}">${nested ? "" : `<h2>${name(r)}</h2>`}<label>${r === "publishing" ? "Did you separately replay a melody or re-sing lyrics?" : "Have you checked this recording sample?"}<select data-field="status"><option value="pending" ${f.status === "pending" ? "selected" : ""}>I’m not sure yet</option><option value="confirmed" ${f.status === "confirmed" ? "selected" : ""}>${r === "publishing" ? "Yes, I replayed or re-sang a part" : "Yes, I used the original recording"}</option><option value="no_use" ${f.status === "no_use" ? "selected" : ""}>${r === "publishing" ? "No separate replay or re-sung part" : "No recording sample"}</option></select></label>${f.status === "no_use" ? '<p class="muted">Nothing else is needed for this check.</p>' : `<label>Suggested times<select data-times="${r}"><option value="pending" ${!f.times_confirmed && !f.edit ? "selected" : ""}>I haven’t checked these yet</option>${f.intervals.length ? `<option value="accept" ${f.times_confirmed && !f.edit ? "selected" : ""}>Yes, use these times</option>` : ""}<option value="edit" ${f.edit ? "selected" : ""}>${f.intervals.length ? "No, let me edit" : "Add times now"}</option></select></label><div class="tableWrap"><table><thead><tr><th>Your track starts (s)</th><th>Ends (s)</th><th>Original starts (s)</th><th>Ends (s)</th>${r === "master" ? "<th>Estimated sound</th>" : ""}${f.edit ? "<th></th>" : ""}</tr></thead><tbody>${f.intervals.map((i, n) => `<tr>${["new_start", "new_end", "original_start", "original_end"].map((k) => `<td>${f.edit ? `<input type="number" min="0" step=".01" data-interval="${n}:${k}" value="${i[k] ?? ""}" aria-label="${k}">` : esc(i[k] ?? "Not located")}</td>`).join("")}${r === "master" ? `<td data-instrument-index="${n}">${esc(soundLabel(i))}</td>` : ""}${f.edit ? `<td><button data-remove="${n}">×</button></td>` : ""}</tr>`).join("")}</tbody></table></div>${f.edit ? `${button("Add appearance", "add")}<label><input type="checkbox" data-field="times_confirmed" ${f.times_confirmed ? "checked" : ""}>I’ve listened and confirmed these times</label>` : ""}`}</div>`;
+  return `<div class="track" data-rights="${r}">${nested ? "" : `<h2>${name(r)}</h2>`}<label>${r === "publishing" ? "Did you separately replay a melody or re-sing lyrics?" : "Have you checked this recording sample?"}<select data-field="status"><option value="pending" ${f.status === "pending" ? "selected" : ""}>I’m not sure yet</option><option value="confirmed" ${f.status === "confirmed" ? "selected" : ""}>${r === "publishing" ? "Yes, I replayed or re-sang a part" : "Yes, I used the original recording"}</option><option value="no_use" ${f.status === "no_use" ? "selected" : ""}>${r === "publishing" ? "No separate replay or re-sung part" : "No recording sample"}</option></select></label>${f.status === "no_use" ? '<p class="muted">Nothing else is needed for this check.</p>' : `<label>Suggested times<select data-times="${r}"><option value="pending" ${!f.times_confirmed && !f.edit ? "selected" : ""}>I haven’t checked these yet</option>${f.intervals.length ? `<option value="accept" ${f.times_confirmed && !f.edit ? "selected" : ""}>Yes, use these times</option>` : ""}<option value="edit" ${f.edit ? "selected" : ""}>${f.intervals.length ? "No, let me edit" : "Add times now"}</option></select></label><div class="tableWrap"><table><thead><tr><th>Your track starts (s)</th><th>Ends (s)</th><th>Original starts (s)</th><th>Ends (s)</th>${r === "master" ? "<th>Estimated sound</th>" : ""}${f.edit ? "<th></th>" : ""}</tr></thead><tbody>${f.intervals.map((i, n) => `<tr>${["new_start", "new_end", "original_start", "original_end"].map((k) => renderTimeCell(i, k, n, f)).join("")}${r === "master" ? `<td data-instrument-index="${n}">${esc(soundLabel(i))}</td>` : ""}${f.edit ? `<td><button data-remove="${n}">×</button></td>` : ""}</tr>`).join("")}</tbody></table></div>${f.edit ? `${button("Add appearance", "add")}<label><input type="checkbox" data-field="times_confirmed" ${f.times_confirmed ? "checked" : ""}>I’ve listened and confirmed these times</label>` : ""}`}</div>`;
 }
 async function loadAudio() {
   for (const role of ["original", "new"]) {
@@ -798,6 +810,8 @@ $("#view").addEventListener("input", (e) => {
   if (r && el.dataset.interval) {
     const [n, k] = el.dataset.interval.split(":");
     forms[r].intervals[n][k] = el.value === "" ? null : Number(el.value);
+    delete forms[r].intervals[n].end_review;
+    el.closest("tr")?.querySelector("[data-ending-review]")?.remove();
     forms[r].times_confirmed = false;
     forms[r].details_confirmed = false;
     approved = false;

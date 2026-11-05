@@ -326,7 +326,7 @@ function timestamp(seconds) {
 
 function readNumber(cell) {
   const input = cell?.querySelector('input[type="number"]');
-  const raw = input ? input.value : cell?.textContent?.trim();
+  const raw = input ? input.value : (cell?.dataset?.timeValue ?? cell?.textContent?.trim());
   if (!raw || /not located/i.test(raw)) return null;
   const value = Number(raw);
   return Number.isFinite(value) ? value : null;
@@ -343,6 +343,7 @@ function rowsFromTable(table) {
         new_end: readNumber(cells[1]),
         original_start: readNumber(cells[2]),
         original_end: readNumber(cells[3]),
+        ending_note: row.querySelector("[data-ending-review]")?.textContent || "",
       };
     })
     .filter(
@@ -356,10 +357,11 @@ function rowsFromTable(table) {
 function sourcePassageHtml(family) {
   if (!family.sourcePassages.length)
     return '<span class="muted">Original passage not located</span>';
+  const endingUncertain = family.rawCandidates.some(item => item.ending_note);
   const chips = family.sourcePassages
     .map(
       (passage) =>
-        `<span class="timestampChip">${timestamp(passage.start)}–${timestamp(passage.end)}</span>`,
+        `<span class="timestampChip">${timestamp(passage.start)}–${endingUncertain ? "≈ " : ""}${timestamp(passage.end)}</span>`,
     )
     .join("");
   const note =
@@ -376,18 +378,30 @@ function derivativeTimestampHtml(family) {
   const chips = visible
     .map(
       (item) =>
-        `<span class="timestampChip">${timestamp(item.new_start)}–${timestamp(item.new_end)}</span>`,
+        `<span class="timestampChip">${timestamp(item.new_start)}–${item.ending_note ? "≈ " : ""}${timestamp(item.new_end)}</span>`,
     )
     .join("");
-  if (!remaining.length) return `<div class="timestampChips">${chips}</div>`;
+  if (!remaining.length) return `<div class="timestampChips">${chips}</div>${endingNotesHtml(family)}`;
   const more = remaining
     .map(
       (item) =>
-        `<span class="timestampChip">${timestamp(item.new_start)}–${timestamp(item.new_end)}</span>`,
+        `<span class="timestampChip">${timestamp(item.new_start)}–${item.ending_note ? "≈ " : ""}${timestamp(item.new_end)}</span>`,
     )
     .join("");
   return `<div class="timestampChips">${chips}</div>
-    <details class="moreTimestamps"><summary>View ${remaining.length} more</summary><div class="timestampChips">${more}</div></details>`;
+    <details class="moreTimestamps"><summary>View ${remaining.length} more</summary><div class="timestampChips">${more}</div></details>${endingNotesHtml(family)}`;
+}
+
+function endingNotesHtml(family) {
+  const notes = [...new Set(family.rawCandidates.map(item => item.ending_note).filter(Boolean))];
+  const escape = text => text.replace(/[&<>"']/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character]);
+  if (!notes.length) return "";
+  const body = notes.map(note => `<small class="endingReview">${escape(note)}</small>`).join("");
+  return notes.length === 1
+    ? `<div data-ending-review-summary>${body}</div>`
+    : `<details data-ending-review-summary><summary>Ending unclear in ${notes.length} suggestions</summary>${body}</details>`;
 }
 
 function summaryTable(families) {

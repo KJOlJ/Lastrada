@@ -2,7 +2,7 @@
 
 import numpy as np
 from scipy.signal import correlate
-from lastrada.schemas.models import Interval
+from lastrada.schemas.models import EndReview, Interval
 
 
 def refine_candidate(original, new, interval, radius=1.0, minimum_correlation=0.75):
@@ -100,6 +100,17 @@ def refine_candidate(original, new, interval, radius=1.0, minimum_correlation=0.
                 matched_length = boundary
 
     start = offset / sr
+    # Weak correlation cannot distinguish an absent tail from a quiet copied
+    # tail under another sound. Keep the estimate, but preserve the untrimmed
+    # anchor extent for listening review instead of implying a precise cutoff.
+    end_review = (
+        EndReview(
+            new_through=(offset + len(anchor)) / sr,
+            original_through=interval.original_start + len(anchor) / sr,
+        )
+        if matched_length < len(anchor)
+        else None
+    )
     return Interval(
         new_start=start,
         new_end=(offset + matched_length) / sr,
@@ -108,4 +119,5 @@ def refine_candidate(original, new, interval, radius=1.0, minimum_correlation=0.
         source="direct_waveform_local_alignment",
         status="candidate",
         similarity=float(np.clip(scores[best], -1, 1)),
+        end_review=end_review,
     )
