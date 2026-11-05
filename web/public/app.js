@@ -1,4 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { restoreEndingReview } from "./ending-review.js";
 import {
   getAuth,
   GoogleAuthProvider,
@@ -622,7 +623,7 @@ async function loadResult({
           ? path.locate.sample_occurrences
           : suggestion.intervals
         )
-          .map((i) => ({ ...i }))
+          .map((i) => restoreEndingReview(i, analysis[r]?.locate.sample_occurrences || []))
           .sort((a, b) => a.new_start - b.new_start || a.new_end - b.new_end),
         times_confirmed: !!path && path.locate.detection_status === "verified",
         details_confirmed: !!path && !path.locate.review_required,
@@ -762,6 +763,7 @@ async function save(approve = false) {
                   original_start: i.original_start ?? null,
                   original_end: i.original_end ?? null,
                   source: "creator_review",
+                  ending_review_context: i.end_review ?? i.ending_review_context ?? null,
                 }))
               : f[k],
           ]),

@@ -1,7 +1,7 @@
 // Verify visible uncertainty, ordinary confirmation/editing, and separate evidence retention.
 const { spawnSync } = require("child_process");
 const path = require("path");
-for (const scenario of ["accept", "edit", "edit_start", "mixed"]) {
+for (const scenario of ["accept", "edit", "edit_start", "mixed", "legacy"]) {
   const env = { ...process.env, LASTRADA_BROWSER_ENDING: scenario };
   delete env.LASTRADA_BROWSER_STEMS;
   delete env.LASTRADA_BROWSER_ANALYSIS;

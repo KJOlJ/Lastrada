@@ -241,6 +241,33 @@ downloads, and all nine instrument scenarios. Identity, cloud transport and
 instrument evidence were simulated; Python review/export validation was real.
 No new model inference, live Firebase validation, push or deployment was performed.
 
+### Reopening saved reviews
+
+The save/reload/edit regression reproduced a remaining gap in `f287bb4`: confirmed
+rows correctly cleared their active warning, but reloading also lost the context
+needed to restore it on a later edit. Reviewed intervals now retain the optional
+`ending_review_context` separately from `end_review`. Confirmation still clears
+the active warning and leaves the reviewed timestamps unchanged. The form restores
+the retained context when loaded, hides it while confirmed, and shows it again
+when the reviewer reopens or edits the times. This also works after an edited end
+has passed the suggested listening point. Raw detector evidence is preserved.
+
+Records without the new field remain valid. For legacy saved rows, the form can
+recover a cue from an exact match of all four timestamps to the original detector
+rows, provided those rows agree on the cue. It does not infer provenance from row
+order, partial overlap or proximity. Older edited rows that no longer exactly
+match, or have conflicting matching evidence, cannot safely recover a cue; their
+raw evidence remains available. New saves retain recovered context for later use.
+Rows without ending evidence remain unchanged. No new user action is required.
+
+Validation passed 212 Python tests, Ruff, JavaScript syntax, synthetic smoke,
+the standard browser suite with five save/reload/edit scenarios, legacy matching
+and ambiguity checks, and all nine instrument scenarios. The regression failed
+on `f287bb4` before the fix. HTML/JSON exports retain reviewed timestamps and
+separate raw evidence; Python serialization tests cover a second save after
+editing beyond both reference points. This is a persistence correction, with no
+new numerical predictions, model inference, deployment or historical rescore.
+
 ## Larger corpus protocol
 
 1. Place archives and the supplied manifest under ignored `data/private/` or an

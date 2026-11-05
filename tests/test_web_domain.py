@@ -1,7 +1,7 @@
 import pytest
 from lastrada.audio.synthetic import demo_pair
 from lastrada.pipeline import analyze_pair
-from lastrada.schemas.models import Intake, Work, Interval
+from lastrada.schemas.models import Analysis, Intake, Work, Interval
 from lastrada.web.domain import ReviewPayload, UseReview, apply_review, owner_key, Upload
 from lastrada.reporting.document import missing_document_inputs, document_text
 
@@ -111,4 +111,30 @@ def test_ending_cue_is_preserved_as_evidence_and_resolved_by_existing_review(exa
     assert result.master.locate.sample_occurrences[0].end_review == interval.end_review
     corrected = result.review.corrected["master"]["locate"]["sample_occurrences"][0]
     assert (corrected["end_review"] is None) == confirmed
+    assert corrected["ending_review_context"] == interval.end_review.model_dump()
     assert corrected["new_end"] == 3.5
+
+
+def test_saved_ending_context_survives_reload_and_edits_beyond_reference_points(example):
+    interval = Interval(
+        new_start=2, new_end=3.5, original_start=1, original_end=2.5,
+        source="direct_waveform_local_alignment", status="candidate",
+        end_review={"new_through": 4, "original_through": 3},
+    )
+    example.master.locate.sample_occurrences = [interval]
+    answer = complete()
+    answer.intervals = [interval]
+    payload = ReviewPayload(paths={"master": answer, "publishing": UseReview(status="no_use")})
+    saved = apply_review(example, payload)
+    reloaded = Analysis.model_validate_json(saved.model_dump_json())
+    row = dict(reloaded.review.corrected["master"]["locate"]["sample_occurrences"][0])
+    row.update(new_start=2.1, new_end=4.25, original_end=3.25)
+    answer.intervals = [Interval.model_validate(row)]
+    resaved = apply_review(reloaded, payload)
+    corrected = resaved.review.corrected["master"]["locate"]["sample_occurrences"][0]
+    assert corrected["new_start"] == 2.1
+    assert corrected["new_end"] == 4.25
+    assert corrected["original_end"] == 3.25
+    assert corrected["end_review"] is None
+    assert corrected["ending_review_context"] == interval.end_review.model_dump()
+    assert resaved.master.locate.sample_occurrences[0] == interval

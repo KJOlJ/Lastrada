@@ -712,6 +712,11 @@ function python(mode, body) {
         throw Error("Analysis download name");
       exportedAnalysis = JSON.parse(fs.readFileSync(await jsonDownload.path(), "utf8"));
     }
+    if (endingScenario === "legacy") {
+      // Simulate a saved review from before ending context was persisted.
+      for (const row of data.analysis.review.corrected.master.locate.sample_occurrences)
+        delete row.ending_review_context;
+    }
     await p.reload();
     await p
       .getByRole("heading", { name: "Listen & check.", exact: true })
@@ -723,6 +728,9 @@ function python(mode, body) {
       const corrected = exportedAnalysis.review.corrected.master.locate.sample_occurrences[0];
       if (corrected.end_review)
         throw Error("Confirmed times retained an unresolved automated cue");
+      if (corrected.ending_review_context?.new_through !== 3 ||
+          corrected.ending_review_context?.original_through !== 4)
+        throw Error("Saved review lost the original ending context");
       if (corrected.new_end !== (endingScenario === "edit" ? 3.2 : 2.5))
         throw Error("Ending cue overwrote the reviewer's chosen time");
       if (endingScenario === "edit_start" && (corrected.new_start !== 1.2 || corrected.original_start !== 2.1))
@@ -734,6 +742,22 @@ function python(mode, body) {
         if (exportedAnalysis.master.locate.sample_occurrences.slice(1).some(row => row.end_review))
           throw Error("An aggregate cue overwrote per-row automated evidence");
       }
+      if (await master.locator("[data-ending-review]").count())
+        throw Error("Reloading a confirmed review restored an active warning too early");
+      await master.locator("[data-times]").selectOption("edit");
+      await master.locator("[data-ending-review]").waitFor({ state: "visible" });
+      await master.locator('[data-interval="0:new_start"]').fill(String(corrected.new_start + 0.05));
+      await master.locator("[data-ending-review]").waitFor({ state: "visible" });
+      if (Number(await master.locator('[data-interval="0:new_end"]').inputValue()) !== corrected.new_end)
+        throw Error("Restoring a saved ending cue changed the reviewed endpoint");
+      const confirmed = master.locator('[data-field="times_confirmed"]');
+      if (await confirmed.isChecked())
+        throw Error("An edit after reload did not reset confirmation");
+      if (endingScenario === "mixed" && await master.locator("[data-ending-review]").count() !== 1)
+        throw Error("Reloading attached a warning to unrelated rows");
+      await confirmed.check();
+      if (await master.locator("[data-ending-review]").count())
+        throw Error("Reconfirmation after reload did not resolve the warning");
     }
     if (errors.length) throw Error(errors.join("; "));
     if (

@@ -69,6 +69,8 @@ class Interval(StrictModel):
     status: Literal["estimated", "candidate", "expert_verified"] = "estimated"
     similarity: float | None = Field(default=None, ge=-1, le=1)
     end_review: EndReview | None = None
+    # Retained listening context for reopening a saved review, not an active warning.
+    ending_review_context: EndReview | None = None
 
     @model_validator(mode="after")
     def ordered(self):
