@@ -237,3 +237,102 @@ def test_per_moment_check_upgrades_legacy_results_and_reuses_complete_rows(servi
     response = client.get(f"/api/analyses/{analysis_id}/result", headers=headers).json()
     assert response["suggestions"]["master"]["instruments"]["element"] == "Bass"
     assert response["suggestions"]["publishing"]["instruments"] == {}
+
+
+@pytest.mark.parametrize("comparison_fails", [False, True])
+def test_short_cued_instrument_job_remains_readable_reviewable_and_exportable(
+    service, monkeypatch, comparison_fails
+):
+    from types import SimpleNamespace
+    from lastrada.schemas.models import Analysis, Intake, Interval, Work
+    from lastrada.separation import occurrences
+    from lastrada.web.execute import execute
+
+    client, cases, queue = service
+    headers = {"Authorization": "Bearer alice", "Origin": "https://lastrada-64bab.web.app"}
+    analysis_id = client.post("/api/analyses", json=payload(), headers=headers).json()["id"]
+    root = prefix(owner_key("Bearer alice"), analysis_id)
+    state, _ = cases.read(root + "/case.json")
+    state["status"] = "completed"
+    cases.write(root + "/case.json", state)
+    result = Analysis(
+        case_id=analysis_id,
+        input=Intake(
+            case_id=analysis_id,
+            original_work=Work(title="Source", artist="Test"),
+            new_work=Work(title="Mix", artist="Test"),
+            analysis_scope=["master", "publishing"],
+        ),
+        durations={"new": 40, "original": 40},
+    )
+    interval = Interval(
+        new_start=10, new_end=11.5, original_start=2, original_end=3.5,
+        source="direct_waveform_local_alignment", status="candidate",
+        end_review={"new_through": 12, "original_through": 4},
+    )
+    result.master.locate.sample_occurrences = [interval]
+    cases.write(root + "/result.json", result.model_dump(mode="json"))
+    snapshots, probes = [], []
+    write = cases.write
+
+    def capture(path, data, generation=None):
+        if path == root + "/result.json":
+            snapshots.append(deepcopy(data))
+        write(path, data, generation)
+
+    def compare(original, new, probe, separator, **kwargs):
+        probes.append(probe)
+        if comparison_fails:
+            raise occurrences.StemSeparationUnavailable("simulated model failure")
+        return SimpleNamespace(evidence=[])
+
+    # Run the actual queued worker/persistence path, replacing cloud storage,
+    # audio decoding and expensive separation with deterministic local doubles.
+    monkeypatch.setattr(cases, "write", capture)
+    monkeypatch.setattr(cases, "download", lambda key, path: path.write_bytes(b"fixture"), raising=False)
+    monkeypatch.setattr("lastrada.web.cloud.Cases", lambda: cases)
+    monkeypatch.setattr("lastrada.audio.io.decode", lambda data: None)
+    monkeypatch.setattr(occurrences, "DemucsSeparator", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(occurrences, "compare_candidate_stems", compare)
+    assert client.post(f"/api/analyses/{analysis_id}/stems", headers=headers).status_code == 200
+    execute(*queue.enqueue.call_args.args)
+    assert len(probes) == 1
+    response = client.get(f"/api/analyses/{analysis_id}/result", headers=headers)
+    assert response.status_code == 200, response.text
+    assert snapshots
+    for snapshot in snapshots:
+        restored = Analysis.model_validate(snapshot)
+        assert restored.master.locate.sample_occurrences[0] == interval
+    row = restored.instrument_occurrences[0]
+    assert row.interval == interval and row.context_only
+    assert row.probe.end_review is None and row.probe.ending_review_context is None
+    assert row.status == ("failed" if comparison_fails else "checked")
+    assert (row.probe.new_start, row.probe.new_end) == (8.75, 12.75)
+    assert (row.probe.original_start, row.probe.original_end) == (0.75, 4.75)
+    assert client.get(f"/api/analyses/{analysis_id}/export/json", headers=headers).status_code == 200
+    review = {
+        "paths": {
+            "master": {
+                "status": "confirmed", "times_confirmed": True, "details_confirmed": True,
+                "intervals": [interval.model_dump(mode="json")],
+                "element": "A sampled sound", "method": "Sampled the recording",
+                "repetition": "One appearance", "role": "Accent",
+                "sections": ["verse"], "placement": "one_time",
+            },
+            "publishing": {"status": "no_use"},
+        },
+        "reviewer": "Test Creator", "approve": True,
+    }
+    response = client.put(f"/api/analyses/{analysis_id}/review", json=review, headers=headers)
+    assert response.status_code == 200, response.text
+    for kind in ("json", "html", "text"):
+        response = client.get(f"/api/analyses/{analysis_id}/export/{kind}", headers=headers)
+        assert response.status_code == 200, response.text
+        if kind == "json":
+            saved = Analysis.model_validate(response.json())
+            assert saved.master.locate.sample_occurrences[0] == interval
+            corrected = saved.review.corrected["master"]["locate"]["sample_occurrences"][0]
+            assert corrected["new_end"] == 11.5 and corrected["end_review"] is None
+            assert corrected["ending_review_context"] == interval.end_review.model_dump()
+        else:
+            assert "NATURE OF USE" in response.text.upper()

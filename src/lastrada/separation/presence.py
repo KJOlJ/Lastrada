@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from lastrada.schemas.models import InstrumentPresence
+from lastrada.schemas.models import InstrumentPresence, Interval
 
 LABELS = {
     "guitar": "Guitar",
@@ -55,11 +55,14 @@ def describe_region(region, start, end):
 
 def context_probe(interval, original_duration, new_duration, maximum=8):
     """Use 4–8 seconds for separation; never rewrite the actual timestamp row."""
-    probe = interval.model_copy(deep=True)
+    # A separation crop is not a reviewed sample interval. Its expanded bounds
+    # must not inherit the sample's ending cue or saved listening context.
+    probe = interval.model_dump()
+    probe.update(end_review=None, ending_review_context=None)
     for prefix, duration in (("original", original_duration), ("new", new_duration)):
         start, end = getattr(interval, prefix + "_start"), getattr(interval, prefix + "_end")
         width = min(duration, maximum, max(4.0, end - start))
         left = max(0.0, min(duration - width, (start + end - width) / 2))
-        setattr(probe, prefix + "_start", left)
-        setattr(probe, prefix + "_end", left + width)
-    return probe
+        probe[prefix + "_start"] = left
+        probe[prefix + "_end"] = left + width
+    return Interval.model_validate(probe)

@@ -1,7 +1,31 @@
 from types import SimpleNamespace
+import pytest
 from lastrada.config import Settings
 from lastrada.schemas.models import Analysis, Intake, Work, Interval, StemEvidence
 from lastrada.separation import occurrences as instruments
+from lastrada.separation.presence import context_probe
+
+
+@pytest.mark.parametrize("start,length", [(10, 1.5), (0, 1.5), (10, 4), (10, 10)])
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_context_probe_keeps_review_metadata_on_the_sample_only(start, length, confirmed):
+    cue = {"new_through": start + length + 0.5, "original_through": length + 2.5}
+    interval = Interval(
+        new_start=start, new_end=start + length, original_start=2, original_end=2 + length,
+        source="direct_waveform_local_alignment",
+        end_review=None if confirmed else cue,
+        ending_review_context=cue if confirmed else None,
+    )
+    before = interval.model_dump()
+    probe = context_probe(interval, 40, 40)
+    # Round-trip validation catches invalid model_copy/assignment combinations.
+    validated = Interval.model_validate_json(probe.model_dump_json())
+    assert validated.end_review is None and validated.ending_review_context is None
+    assert validated.new_end - validated.new_start == min(8, max(4, length))
+    assert interval.model_dump() == before
+    if start == 10 and length == 1.5:
+        assert (probe.new_start, probe.new_end) == (8.75, 12.75)
+        assert (probe.original_start, probe.original_end) == (0.75, 4.75)
 
 
 def sample():
