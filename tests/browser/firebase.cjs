@@ -234,7 +234,7 @@ function python(mode, body) {
         } else
           return route.fulfill({
             headers,
-            body: python(u.pathname.endsWith("/html") ? "html" : "text", {
+            body: python(u.pathname.split("/").pop(), {
               analysis: data.analysis,
             }),
             contentType: "text/plain",
@@ -356,21 +356,55 @@ function python(mode, body) {
       await cue.waitFor({ state: "visible" });
       if (!(await cue.textContent()).includes("0:03.00 in your track and 0:04.00"))
         throw Error("Ending review extent missing from visible grouped table");
-      if (!(await master.locator(".groupedUseTable").textContent()).includes("≈ 0:02.5"))
+      if (!(await cue.textContent()).includes("Audio may continue beyond these points"))
+        throw Error("Listening points must not imply a sufficient extent or end limit");
+      const expectedApproximateEnd = endingScenario === "mixed" ? "≈ 0:02.8" : "≈ 0:02.5";
+      if (!(await master.locator(".groupedUseTable").textContent()).includes(expectedApproximateEnd))
         throw Error("Grouped ending should be approximate without losing its numeric value");
       if (!(await master.locator(".groupedUseTable").textContent()).includes("≈ 0:03.5"))
         throw Error("Original ending lost its uncertainty cue");
       if ((await master.locator(".groupedUseTable tbody tr").count()) !== 1)
         throw Error("Ending cue changed sample grouping");
+      if (endingScenario === "mixed") {
+        const chips = await master.locator(".groupedUseTable tbody tr").first()
+          .locator("td").nth(3).locator(".timestampChip").allTextContents();
+        if (chips.length !== 2 || !chips[0].includes("≈") || chips[1].includes("≈"))
+          throw Error("Mixed cue status was lost or propagated to a separate occurrence");
+        const rawRows = master.locator(".exactTimestamps tbody tr");
+        if (await rawRows.count() !== 3 || await rawRows.nth(0).locator("[data-ending-review]").count() !== 1
+          || await rawRows.nth(1).locator("[data-ending-review]").count() !== 0
+          || await rawRows.nth(2).locator("[data-ending-review]").count() !== 0)
+          throw Error("Grouping changed per-row ending evidence");
+      }
       if (process.env.LASTRADA_BROWSER_OUTPUT) {
         fs.mkdirSync(process.env.LASTRADA_BROWSER_OUTPUT, { recursive: true });
         await p.screenshot({ path: path.join(process.env.LASTRADA_BROWSER_OUTPUT, "ending-review.png"), fullPage: true });
       }
       if (endingScenario === "edit") {
         await master.locator("[data-times]").selectOption("edit");
-        await master.locator('[data-interval="0:new_end"]').fill("2.6");
+        await master.locator('[data-interval="0:new_end"]').fill("2.50");
+        await master.locator("[data-ending-review]").waitFor({ state: "visible" });
+        // A user can set an end beyond the suggested listening point. Retain
+        // the warning until listening confirmation, without constraining edits.
+        await master.locator('[data-interval="0:new_end"]').fill("3.2");
+        await master.locator("[data-ending-review]").waitFor({ state: "visible" });
+      }
+      if (endingScenario === "edit_start") {
+        await master.locator("[data-times]").selectOption("edit");
+        await master.locator('[data-interval="0:new_start"]').fill("1.1");
+        await master.locator("[data-ending-review]").waitFor({ state: "visible" });
+        const confirmed = master.locator('[data-field="times_confirmed"]');
+        await confirmed.check();
         if (await master.locator("[data-ending-review]").count())
-          throw Error("Edited times retained a stale automated ending cue");
+          throw Error("Listening confirmation did not resolve the editing warning");
+        await master.locator('[data-interval="0:new_start"]').fill("1.2");
+        await master.locator("[data-ending-review]").waitFor({ state: "visible" });
+        if (await confirmed.isChecked())
+          throw Error("Editing after confirmation must reset the listening check");
+        await master.locator('[data-interval="0:original_start"]').fill("2.1");
+        await master.locator("[data-ending-review]").waitFor({ state: "visible" });
+        if (await master.locator('[data-interval="0:new_end"]').inputValue() !== "2.5")
+          throw Error("Start-only edits changed the endpoint");
       }
     }
     await master.locator("[data-times]").selectOption("accept");
@@ -389,6 +423,8 @@ function python(mode, body) {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await master.locator("[data-times]").selectOption("pending");
+    if (endingScenario)
+      await master.locator("[data-ending-review-summary]").waitFor({ state: "visible" });
     await p
       .getByRole("button", { name: "Next: Describe the sound →", exact: true })
       .click();
@@ -666,19 +702,38 @@ function python(mode, body) {
       !fs.readFileSync(await download.path(), "utf8").includes("NATURE OF USE")
     )
       throw Error("Missing exported document");
+    let exportedAnalysis = data.analysis;
+    if (endingScenario) {
+      await p.getByText("Supporting analysis", { exact: true }).click();
+      const jsonReady = p.waitForEvent("download");
+      await p.getByRole("button", { name: "Download analysis JSON", exact: true }).click();
+      const jsonDownload = await jsonReady;
+      if (jsonDownload.suggestedFilename() !== "supporting-analysis.json")
+        throw Error("Analysis download name");
+      exportedAnalysis = JSON.parse(fs.readFileSync(await jsonDownload.path(), "utf8"));
+    }
     await p.reload();
     await p
       .getByRole("heading", { name: "Listen & check.", exact: true })
       .waitFor();
     if (!approved) throw Error("Backend review was not approved");
     if (endingScenario) {
-      if (!data.analysis.master.locate.sample_occurrences[0].end_review)
+      if (!exportedAnalysis.master.locate.sample_occurrences[0].end_review)
         throw Error("Review erased automated ending uncertainty from saved evidence");
-      const corrected = data.analysis.review.corrected.master.locate.sample_occurrences[0];
+      const corrected = exportedAnalysis.review.corrected.master.locate.sample_occurrences[0];
       if (corrected.end_review)
         throw Error("Confirmed times retained an unresolved automated cue");
-      if (corrected.new_end !== (endingScenario === "edit" ? 2.6 : 2.5))
+      if (corrected.new_end !== (endingScenario === "edit" ? 3.2 : 2.5))
         throw Error("Ending cue overwrote the reviewer's chosen time");
+      if (endingScenario === "edit_start" && (corrected.new_start !== 1.2 || corrected.original_start !== 2.1))
+        throw Error("Start edits were not preserved in reviewed exports");
+      if (endingScenario === "mixed") {
+        const correctedRows = exportedAnalysis.review.corrected.master.locate.sample_occurrences;
+        if (correctedRows.length !== 3 || correctedRows[1].new_end !== 2.75 || correctedRows[2].new_end !== 11.5)
+          throw Error("Grouped uncertainty changed individual reviewed timestamps");
+        if (exportedAnalysis.master.locate.sample_occurrences.slice(1).some(row => row.end_review))
+          throw Error("An aggregate cue overwrote per-row automated evidence");
+      }
     }
     if (errors.length) throw Error(errors.join("; "));
     if (

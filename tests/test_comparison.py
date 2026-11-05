@@ -51,3 +51,5 @@ def test_hover_explains_ambiguous_ending_without_calling_it_a_confidence_bound()
     assert "Ending unclear" in marker.hovertemplate
     assert "0:04.00 in your track" in marker.hovertemplate
     assert "0:03.00 in the original" in marker.hovertemplate
+    assert "Audio may continue beyond these points" in marker.hovertemplate
+    assert "Listen through" not in marker.hovertemplate

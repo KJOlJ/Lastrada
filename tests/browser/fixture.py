@@ -32,6 +32,17 @@ def initial():
                 end_review={"new_through": 3, "original_through": 4},
             )
         ]
+        if os.getenv("LASTRADA_BROWSER_ENDING") == "mixed":
+            analysis.master.locate.sample_occurrences.extend([
+                Interval(
+                    new_start=1, new_end=2.75, original_start=2, original_end=3.5,
+                    source="direct_waveform_local_alignment", status="candidate",
+                ),
+                Interval(
+                    new_start=10, new_end=11.5, original_start=2, original_end=3.5,
+                    source="direct_waveform_local_alignment", status="candidate",
+                ),
+            ])
     if os.getenv("LASTRADA_BROWSER_ANALYSIS"):
         analysis = Analysis.model_validate_json(
             Path(os.environ["LASTRADA_BROWSER_ANALYSIS"]).read_text()
@@ -75,5 +86,7 @@ if __name__ == "__main__":
             )
         elif mode == "html":
             print(document_html(analysis))
+        elif mode == "json":
+            print(analysis.model_dump_json(indent=2))
         else:
             print(document_text(analysis))

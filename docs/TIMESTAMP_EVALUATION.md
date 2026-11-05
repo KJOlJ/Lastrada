@@ -169,15 +169,19 @@ ending when it is attenuated and obscured by another sound. A weak correlation
 does not establish that the copied sound stopped. The next change therefore
 preserves numeric estimates and acceptance decisions while adding `end_review`
 to every shortened anchor: the untrimmed paired anchor endpoints and the reason
-`quiet_or_obscured_tail`. These are listening extents, not a confidence interval,
-verified continuation, or a guarantee that the true end falls inside that range.
+`quiet_or_obscured_tail`. These are listening reference points, not a confidence
+interval, verified continuation, or a guarantee that the true end falls inside
+that range.
 Unchanged long matches, clean anchors and rejected candidates get no cue.
 
 The Firebase listening table marks affected endpoints as approximate and says
-"Ending unclear" with the time to listen through in each track. The cue stays
-visible in the grouped relationship table, and numeric data attributes preserve
-grouping and instrument-evidence matching. Existing time confirmation resolves
-the cue; editing clears it from the form. No extra confirmation step is added.
+"Ending unclear" with a reference point in each track. It explicitly says audio
+may continue beyond those points and asks the reviewer to listen for the actual
+ending. The cue stays visible in the grouped relationship table, and numeric data
+attributes preserve grouping and instrument-evidence matching. Existing time confirmation resolves
+the cue; edits retain it until that confirmation, including edits to a start only
+or to an end beyond the reference point. Editing again resets confirmation and
+restores the cue. No extra confirmation step is added.
 Raw automated JSON retains the note separately from reviewed times, and the
 spectral hover explains it too. Legacy intervals without the field still load.
 
@@ -209,6 +213,33 @@ the standard browser suite, both ending accept/edit flows and all nine instrumen
 scenarios. Browser identity, cloud transport and instrument evidence are simulated;
 Python review and document validation are real. No new model inference or live
 deployment was performed. No changes have been pushed or deployed.
+
+### Ending review corrections
+
+Independent review of `545c672` found that editing a start removed an unresolved
+ending warning, that the listening wording could imply a sufficient stopping
+point, and that an overlapping uncued row could become the displayed
+representative and lose the derivative approximate marker. The corrections above
+address the first two issues. For the third, an occurrence now retains its
+approximate marker when any of its contributing rows has an unresolved ending.
+Separate uncued occurrences stay unmarked. Representative timestamps, grouping,
+and raw row evidence are unchanged; the note is still shown once per distinct
+warning in the existing summary.
+
+The mixed-row regression failed before the fix and passed afterward. Browser
+coverage exercises start-only edits, unchanged and extended end edits, listening
+confirmation, editing after confirmation, returning to pending review, overlapping
+mixed cues, and reviewed JSON/document exports. The independent evaluator reported
+10,550 unchanged numeric outputs for `545c672` and all 829 previously identified
+obscured tails flagged; those larger-corpus checks were not run in this executor.
+This follow-up changes review behavior and wording only, not numeric predictions.
+The warning remains a listening cue rather than an uncertainty interval.
+
+Validation passed 211 Python tests, Ruff, JavaScript syntax, synthetic smoke, the
+standard browser suite, all four ending-review scenarios through HTML and JSON
+downloads, and all nine instrument scenarios. Identity, cloud transport and
+instrument evidence were simulated; Python review/export validation was real.
+No new model inference, live Firebase validation, push or deployment was performed.
 
 ## Larger corpus protocol
 

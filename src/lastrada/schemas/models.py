@@ -52,7 +52,7 @@ class Intake(StrictModel):
 
 
 class EndReview(StrictModel):
-    """Listening extent for an ambiguous ending, not a statistical confidence bound."""
+    """Listening reference points, not end limits or statistical confidence bounds."""
 
     new_through: float = Field(gt=0)
     original_through: float = Field(gt=0)

@@ -90,13 +90,17 @@ function collapseNewOccurrences(intervals) {
   }
 
   return clusters
-    .map((cluster) =>
-      [...cluster].sort(
+    .map((cluster) => {
+      const representative = [...cluster].sort(
         (a, b) =>
           (b.similarity ?? -2) - (a.similarity ?? -2) ||
           duration(b.new_start, b.new_end) - duration(a.new_start, a.new_end),
-      )[0],
-    )
+      )[0];
+      return {
+        ...representative,
+        ending_uncertain: cluster.some(item => Boolean(item.ending_note || item.ending_uncertain)),
+      };
+    })
     .sort((a, b) => a.new_start - b.new_start || a.new_end - b.new_end);
 }
 
@@ -378,14 +382,14 @@ function derivativeTimestampHtml(family) {
   const chips = visible
     .map(
       (item) =>
-        `<span class="timestampChip">${timestamp(item.new_start)}–${item.ending_note ? "≈ " : ""}${timestamp(item.new_end)}</span>`,
+        `<span class="timestampChip">${timestamp(item.new_start)}–${item.ending_uncertain ? "≈ " : ""}${timestamp(item.new_end)}</span>`,
     )
     .join("");
   if (!remaining.length) return `<div class="timestampChips">${chips}</div>${endingNotesHtml(family)}`;
   const more = remaining
     .map(
       (item) =>
-        `<span class="timestampChip">${timestamp(item.new_start)}–${item.ending_note ? "≈ " : ""}${timestamp(item.new_end)}</span>`,
+        `<span class="timestampChip">${timestamp(item.new_start)}–${item.ending_uncertain ? "≈ " : ""}${timestamp(item.new_end)}</span>`,
     )
     .join("");
   return `<div class="timestampChips">${chips}</div>

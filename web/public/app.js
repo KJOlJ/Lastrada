@@ -420,7 +420,14 @@ function name(r) {
 function endingReviewNote(interval, confirmed = false) {
   const review = interval.end_review;
   if (!review || confirmed) return "";
-  return `<small class="endingReview" data-ending-review>Ending unclear—quiet or masked audio may continue. Listen through ${esc(formatTime(review.new_through))} in your track and ${esc(formatTime(review.original_through))} in the original before confirming.</small>`;
+  return `<small class="endingReview" data-ending-review>Ending unclear. Check around ${esc(formatTime(review.new_through))} in your track and ${esc(formatTime(review.original_through))} in the original. Audio may continue beyond these points; listen for the actual ending before confirming.</small>`;
+}
+function refreshEndingReview(track, form) {
+  track.querySelectorAll("[data-ending-review]").forEach(note => note.remove());
+  form.intervals.forEach((interval, row) => {
+    const cell = track.querySelector(`[data-interval="${row}:new_end"]`)?.closest("td");
+    cell?.insertAdjacentHTML("beforeend", endingReviewNote(interval, form.times_confirmed));
+  });
 }
 function renderTimeCell(interval, key, row, form) {
   const uncertain = interval.end_review && !form.times_confirmed && key.endsWith("_end");
@@ -804,16 +811,20 @@ $("#view").addEventListener("input", (e) => {
     approved = false;
   } else if (r && el.dataset.field) {
     forms[r][el.dataset.field] = el.type === "checkbox" ? el.checked : el.value;
+    if (el.dataset.field === "times_confirmed")
+      refreshEndingReview(el.closest(".track"), forms[r]);
     if (r === "master") touchedSoundFields.add(el.dataset.field);
     approved = false;
   }
   if (r && el.dataset.interval) {
     const [n, k] = el.dataset.interval.split(":");
     forms[r].intervals[n][k] = el.value === "" ? null : Number(el.value);
-    delete forms[r].intervals[n].end_review;
-    el.closest("tr")?.querySelector("[data-ending-review]")?.remove();
     forms[r].times_confirmed = false;
     forms[r].details_confirmed = false;
+    const track = el.closest(".track");
+    const confirmation = track.querySelector('[data-field="times_confirmed"]');
+    if (confirmation) confirmation.checked = false;
+    refreshEndingReview(track, forms[r]);
     approved = false;
     if (r === "master") {
       applyInstrumentPrefill();

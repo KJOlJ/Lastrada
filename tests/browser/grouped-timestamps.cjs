@@ -129,6 +129,23 @@ const { pathToFileURL } = require("url");
   const distinct = module.groupIntervals(separate, 120);
   assert.strictEqual(distinct.length, 2);
 
+  const mixedCues = [
+    { rowIndex: 0, new_start: 1, new_end: 2.5, original_start: 2, original_end: 3.5,
+      ending_note: "Ending unclear for this row" },
+    { rowIndex: 1, new_start: 1, new_end: 2.75, original_start: 2, original_end: 3.5 },
+    { rowIndex: 2, new_start: 10, new_end: 11.5, original_start: 2, original_end: 3.5 },
+  ];
+  const originalRows = structuredClone(mixedCues);
+  const mixed = module.groupIntervals(mixedCues, 20);
+  assert.strictEqual(mixed.length, 1);
+  assert.strictEqual(mixed[0].occurrenceCount, 2);
+  assert.strictEqual(mixed[0].occurrences[0].new_end, 2.75);
+  assert.strictEqual(mixed[0].occurrences[0].ending_uncertain, true);
+  assert.strictEqual(mixed[0].occurrences[1].ending_uncertain, false);
+  assert.strictEqual(mixed[0].occurrences[0].ending_note, undefined);
+  assert.deepStrictEqual(mixedCues, originalRows);
+  assert.deepStrictEqual(mixed[0].rawCandidates, originalRows);
+
   console.log("Grouped relationship tests passed");
 })().catch((error) => {
   console.error(error);
