@@ -53,6 +53,10 @@ function python(mode, body) {
       interval.original_start = 0;
       interval.original_end = 18;
     }
+    if (instrumentScenario === "repeated_probes") {
+      Object.assign(interval, { new_start: 0, new_end: 10, original_start: 0, original_end: 10 });
+      data.analysis.durations.new = 40;
+    }
     data.analysis.master.locate.sample_occurrences = [interval];
     data.suggestions.master.intervals = [interval];
     data.instrument_rows = [
@@ -66,7 +70,7 @@ function python(mode, body) {
         suggested_instruments: [],
       },
     ];
-    if (instrumentScenario === "success") {
+    if (["success", "repeated_probes"].includes(instrumentScenario)) {
       const second = {
         ...interval,
         new_start: 6,
@@ -74,6 +78,8 @@ function python(mode, body) {
         original_start: 10,
         original_end: 13,
       };
+      if (instrumentScenario === "repeated_probes")
+        Object.assign(second, { new_start: 20, new_end: 40, original_start: 0, original_end: 10 });
       data.analysis.master.locate.sample_occurrences.push(second);
       data.suggestions.master.intervals = [
         ...data.analysis.master.locate.sample_occurrences,
@@ -293,6 +299,22 @@ function python(mode, body) {
                   new_start: 6, new_end: 14, original_start: 5, original_end: 13,
                 };
               }
+              if (instrumentScenario === "repeated_probes") {
+                data.analysis.stem_evidence = [];
+                data.instrument_rows.forEach((row, index) => {
+                  const start = index ? 3 : 1, end = index ? 7 : 9;
+                  row.status = "checked";
+                  row.probe = {
+                    ...row.interval, original_start: start, original_end: end,
+                    new_start: index ? 26 : 1, new_end: index ? 34 : 9,
+                  };
+                  row.source_sounds = (index ? ["Guitar"] : ["Guitar", "Bass"]).map(instrument => ({
+                    instrument, energy_share: index ? 1 : 0.5, scope: "sample", start, end,
+                  }));
+                  row.suggested_instruments = [];
+                  row.evidence = [];
+                });
+              }
               if (instrumentScenario === "success") {
                 data.instrument_rows[1] = {
                   ...data.instrument_rows[1],
@@ -506,7 +528,7 @@ function python(mode, body) {
             .getByText(
               instrumentScenario === "short_context"
                 ? "Context only; reuse unconfirmed"
-                : instrumentScenario === "no_match"
+                : ["no_match", "repeated_probes"].includes(instrumentScenario)
                 ? "No supporting match"
                 : "Possible supporting match",
               { exact: true },
@@ -531,6 +553,23 @@ function python(mode, body) {
               throw Error("Bounded stem evidence lost its actual checked times");
             if (!(await master.locator(".groupedUseTable").innerText()).includes("0:19.0"))
               throw Error("A bounded stem check truncated the reported match");
+          }
+          if (instrumentScenario === "repeated_probes") {
+            const portions = master.locator("[data-stem-dtw-evidence] .checkedPortions");
+            await portions.locator("summary").click();
+            const checked = await portions.innerText();
+            if (!checked.includes("Original: 1.00–9.00 s") || !checked.includes("Original: 3.00–7.00 s"))
+              throw Error("Repeated source rows lost their distinct checked portions");
+            const presence = master.locator("[data-stem-dtw-evidence] .instrumentPresence");
+            await presence.locator("summary").click();
+            const rows = presence.locator(":scope > div");
+            if (await rows.count() !== 2) throw Error("Missing per-occurrence sound estimates");
+            const wide = await rows.nth(0).innerText(), narrow = await rows.nth(1).innerText();
+            if (!wide.includes("Bass (1.00–9.00 s)") || !narrow.includes("Guitar (3.00–7.00 s)")
+              || narrow.includes("Bass") || !narrow.includes("Original 0.00–10.00 s"))
+              throw Error("Repeated source estimates were conflated or lost measured scope");
+            if (!(await presence.innerText()).includes("only when the measured portion is the same"))
+              throw Error("Source sharing explanation overstates agreement across different portions");
           }
           if (instrumentScenario === "success") {
             const rows = p

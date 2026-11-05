@@ -5,6 +5,7 @@ for (const scenario of [
   "success",
   "short_context",
   "bounded",
+  "repeated_probes",
   "worker_failure",
   "download_failure",
   "quota",

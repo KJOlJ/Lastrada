@@ -85,21 +85,27 @@ def instrument_prefill(result, model_name=None):
 
 
 def stabilize_source_descriptions(rows, descriptions=None):
-    """Share only source presence for identical source times and model versions.
+    """Share source presence only for the same source, measured scope and model.
 
     Different new mixes keep their own estimates and alignment decisions. Nearby
     or overlapping source passages are deliberately not treated as identical.
+    Measurements may cover less than the full interval, or sample audio within a
+    larger context probe. Use their actual bounds, not the requested probe alone.
     """
     if descriptions is None:
         descriptions = {}
     for row in rows:
         if row.status != "checked" or not row.source_sounds:
             continue
+        scopes = {(sound.scope, sound.start, sound.end) for sound in row.source_sounds}
+        if len(scopes) != 1:
+            continue  # Mixed-scope legacy estimates cannot form one shared measurement.
         key = (
             row.model_name,
             row.evidence_version,
             row.interval.original_start,
             row.interval.original_end,
+            next(iter(scopes)),
         )
         if key not in descriptions:
             descriptions[key] = row.source_sounds

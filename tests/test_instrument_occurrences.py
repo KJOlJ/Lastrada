@@ -236,6 +236,7 @@ def test_repeated_source_description_is_shared_but_reuse_decisions_are_independe
     for row in rows:
         row.status = "checked"
         row.interval.original_start, row.interval.original_end = 0, 4
+        row.probe = row.interval.model_copy(deep=True)
 
     def presence(label):
         return [
@@ -270,3 +271,38 @@ def test_resuming_an_earlier_row_preserves_the_saved_source_description():
     ]
     instruments.stabilize_source_descriptions(rows, canonical)
     assert all(r.source_sounds[0].instrument == "Bass" for r in rows)
+
+
+@pytest.mark.parametrize("difference", ["start", "end", "scope", "mixed", "source", "model", "version"])
+def test_source_sharing_requires_same_measured_scope_source_and_model(difference):
+    from lastrada.schemas.models import InstrumentPresence
+
+    rows = instruments.occurrence_rows(sample())[:2]
+    for row, label in zip(rows, ("Bass", "Guitar"), strict=True):
+        row.status = "checked"
+        row.interval.original_start, row.interval.original_end = 0, 4
+        row.probe = row.interval.model_copy(deep=True)
+        row.source_sounds = [
+            InstrumentPresence(instrument=label, energy_share=0.8, scope="sample", start=0, end=4)
+        ]
+    changed = rows[1]
+    if difference == "start":
+        changed.source_sounds[0].start = 1
+    elif difference == "end":
+        changed.source_sounds[0].end = 3
+    elif difference == "scope":
+        changed.source_sounds[0].scope = "context"
+    elif difference == "mixed":
+        changed.source_sounds.append(changed.source_sounds[0].model_copy(update={"end": 3}))
+    elif difference == "source":
+        changed.interval.original_end = 5
+    elif difference == "model":
+        changed.model_name = "different-model"
+    else:
+        changed.evidence_version += 1
+    before = [row.model_dump() for row in rows]
+    cache = {}
+    for row in reversed(rows):
+        instruments.stabilize_source_descriptions([row], cache)
+    instruments.stabilize_source_descriptions(rows, cache)
+    assert [row.model_dump() for row in rows] == before

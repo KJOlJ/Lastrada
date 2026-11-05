@@ -77,7 +77,7 @@ function presenceHtml(rows) {
     ? values.map(value => `${esc(value.instrument)} (${Number(value.start).toFixed(2)}–${Number(value.end).toFixed(2)} s${value.scope === "context" ? ", surrounding context" : ""})`).join(", ")
     : "No clear estimate";
   return `<details class="instrumentPresence"><summary>Sounds at each timestamp</summary>
-    <p>Estimated sounds present in each recording; this does not establish which sounds were sampled. Identical source intervals share one estimate; the new mix can differ. “Other” remains unidentified.</p>
+    <p>Estimated sounds present in each recording; this does not establish which sounds were sampled. Repeated source intervals share an estimate only when the measured portion is the same; the new mix can differ. “Other” remains unidentified.</p>
     ${checked.map(row => `<div><strong>New ${Number(row.interval.new_start).toFixed(2)}–${Number(row.interval.new_end).toFixed(2)} s · Original ${Number(row.interval.original_start).toFixed(2)}–${Number(row.interval.original_end).toFixed(2)} s</strong><br>
       Original: ${sounds(row.source_sounds)}<br>New mix: ${sounds(row.new_sounds)}
       ${row.context_only ? "<small>Alignment was checked in surrounding context only.</small>" : ""}</div>`).join("")}

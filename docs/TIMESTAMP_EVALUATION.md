@@ -312,6 +312,38 @@ saves review, and exports JSON/HTML/text after both successful and failed checks
 Previously saved invalid experimental probes are not migrated automatically;
 the fix prevents new invalid probes while keeping the interval invariant strict.
 
+## Repeated-source measurement scope
+
+Independent review reproduced a scope-sharing error in `6bf852a`: two occurrences
+referenced source 0–10 seconds, but their different playback durations produced
+source probes of 1–9 and 3–7 seconds. Stabilization keyed only the full source times
+and model, so either measurement could overwrite the other depending on row order.
+Generated separated audio reproduced Bass + Guitar from the wider region leaking
+into the narrower Guitar-only region, and the reverse loss of Bass when the narrow
+row was processed first.
+
+Sharing now also requires exact agreement on the measured start, end and
+sample/context scope. These come from the presence measurements, since a short
+sample can be measured inside a larger context probe. Different source intervals,
+model versions or measured scopes retain independent estimates. Mixed-scope lists
+are preserved without sharing. Matching measurements still reuse the first saved
+description, including when a job resumes; new-mix estimates, alignment decisions
+and prefills remain independent. The existing sound-details explanation now
+states that sharing requires the same measured portion.
+
+Regression coverage includes both processing orders, different probe lengths,
+save/reload/resume, matching-scope reuse, and separate full, checked and measured
+times in the browser. Generated stems test scope preservation, not Demucs
+identification quality. No detector boundaries, thresholds, schema or stored
+evidence version changed. Already overwritten experimental estimates cannot be
+reconstructed from those saved estimates alone; this fix prevents further incorrect
+sharing and does not migrate them or rescore the historical benchmark.
+
+Validation passed 236 Python tests, Ruff, JavaScript syntax, the standard browser
+suite and all eleven instrument scenarios. The new browser case checks distinct
+measured scopes through the existing review and document-export flow. Nothing
+was pushed or deployed.
+
 ## Larger corpus protocol
 
 1. Place archives and the supplied manifest under ignored `data/private/` or an
