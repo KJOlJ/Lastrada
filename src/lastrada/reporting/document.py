@@ -2,6 +2,7 @@
 
 from html import escape
 from lastrada.schemas.models import Analysis, PathResult
+from lastrada.reporting.sample_flow import automatic_path
 
 RIGHTS_NAMES = {
     "master": "Recording sample (master)",
@@ -18,11 +19,13 @@ def missing_document_inputs(analysis):
     missing = []
     for rights, path in document_paths(analysis).items():
         name = RIGHTS_NAMES[rights]
+        if analysis.review.workflow == "sample" and path.locate.detection_status == "not_requested":
+            continue
         if path.locate.detection_status == "not_detected":
             if path.locate.review_required:
                 missing.append(f"{name}: check the no-use finding")
             continue
-        if path.locate.detection_status != "verified":
+        if path.locate.detection_status != "verified" and not automatic_path(path):
             missing.append(f"{name}: confirm what was reused")
         if not path.locate.sample_occurrences:
             missing.append(f"{name}: add the times it appears in your track")
@@ -62,8 +65,13 @@ def document_text(analysis: Analysis):
         "",
     ]
     for rights, path in document_paths(analysis).items():
+        if analysis.review.workflow == "sample" and path.locate.detection_status == "not_requested":
+            continue
         lines += [RIGHTS_NAMES[rights]]
-        if path.locate.detection_status == "verified":
+        automatic = automatic_path(path)
+        if path.locate.detection_status == "verified" or automatic:
+            if automatic:
+                lines.append("Sample timings are automatically estimated; description reviewed separately.")
             for feature in path.describe.elements:
                 if feature.value:
                     lines.append(
@@ -71,18 +79,23 @@ def document_text(analysis: Analysis):
                     )
             if path.classification.placement == "throughout":
                 lines.append("Placement: throughout the track")
+                if automatic and any(i.end_review for i in path.locate.sample_occurrences):
+                    lines.append("Some endings are uncertain and may extend beyond the estimated times.")
             else:
                 for occurrence in path.locate.sample_occurrences:
+                    approximate = "≈ " if automatic and occurrence.end_review else ""
                     lines.append(
-                        f"In new track: {timestamp(occurrence.new_start)}–{timestamp(occurrence.new_end)}; "
-                        f"in original: {timestamp(occurrence.original_start)}–{timestamp(occurrence.original_end)}"
+                        f"In new track: {timestamp(occurrence.new_start)}–{approximate}{timestamp(occurrence.new_end)}; "
+                        f"in original: {timestamp(occurrence.original_start)}–{approximate}{timestamp(occurrence.original_end)}"
                     )
+                    if approximate:
+                        lines.append("The ending is uncertain and may extend beyond the displayed time.")
             if (
                 path.locate.total_covered_seconds is not None
                 and path.locate.coverage_percentage is not None
             ):
                 lines.append(
-                    f"Reviewed total use: {path.locate.total_covered_seconds:.2f}s "
+                    f"{'Estimated' if automatic else 'Reviewed'} total use: {path.locate.total_covered_seconds:.2f}s "
                     f"({path.locate.coverage_percentage:.1f}% of the new track)"
                 )
             else:
@@ -98,6 +111,7 @@ def document_text(analysis: Analysis):
             ("Role in the track", path.describe.role_in_new_song),
         ]:
             lines.append(f"{label}: {value or 'not yet provided'}")
+        lines.extend(path.describe.limitations)
         lines.append("")
     missing = missing_document_inputs(analysis)
     if missing:
@@ -128,6 +142,8 @@ def creator_narrative(analysis):
     parts = []
     for rights in analysis.input.analysis_scope:
         path = getattr(analysis, rights)
+        if analysis.review.workflow == "sample" and path.locate.detection_status == "not_requested":
+            continue
         name = "the original recording" if rights == "master" else "the original composition"
         if path.locate.detection_status == "not_detected":
             parts.append(
@@ -136,7 +152,8 @@ def creator_narrative(analysis):
                 else f"No reuse of {name} was identified in this listening check."
             )
             continue
-        if path.locate.detection_status != "verified":
+        automatic = automatic_path(path)
+        if path.locate.detection_status != "verified" and not automatic:
             parts.append(
                 f"The use of {name} in the new track has not yet been checked. "
                 "The musical part, its appearances and the way it is used still need to be described."
@@ -160,9 +177,15 @@ def creator_narrative(analysis):
                 f"{timestamp(i.new_start)}–{timestamp(i.new_end)}"
                 for i in path.locate.sample_occurrences
             )
-            parts.append(f"It can be heard at {ranges} in the new track.")
+            parts.append(f"{'Estimated appearances' if automatic else 'It can be heard'} at {ranges} in the new track.")
         if path.describe.sections and path.describe.sections != ["whole track"]:
-            parts.append("It appears in the " + ", ".join(path.describe.sections) + " sections.")
+            parts.append(
+                "It appears in the matched passages."
+                if path.describe.sections == ["matched passages"]
+                else "It appears in the " + ", ".join(path.describe.sections) + " sections."
+            )
+        if automatic and any(i.end_review for i in path.locate.sample_occurrences):
+            parts.append("Some sample endings are uncertain and may extend beyond the estimated times.")
         if path.describe.repetition:
             parts.append(f"Repetition: {path.describe.repetition}.")
         if path.describe.role_in_new_song:

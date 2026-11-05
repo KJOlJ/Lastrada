@@ -97,7 +97,7 @@ def execute(owner, analysis_id, operation, task_id):
                     artist=credits["new_artist"],
                     audio_file=state["uploads"]["new"]["name"],
                 ),
-                analysis_scope=["master", "publishing"],
+                analysis_scope=["master"],
             )
             adapter, warning = None, None
             try:

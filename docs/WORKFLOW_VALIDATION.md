@@ -1,5 +1,10 @@
 # Web workflow regression checks
 
+The current Firebase description and confirmation flow is documented in
+[SAMPLE_DESCRIPTION_FLOW.md](SAMPLE_DESCRIPTION_FLOW.md). The listening and
+replay-confirmation flow below describes the retained classic compatibility
+tests, not the current interface when connected to the updated API.
+
 For the current `local/stem-fast` Firebase test, use
 [STEM_FAST_FIREBASE.md](STEM_FAST_FIREBASE.md). The four-stem measurements below
 are historical results from `feat/firebase-web`, not measurements of the new

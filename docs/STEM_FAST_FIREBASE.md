@@ -13,6 +13,10 @@ public Streamlit service and a larger resource allocation.
 
 ## Current evidence update
 
+See [SAMPLE_DESCRIPTION_FLOW.md](SAMPLE_DESCRIPTION_FLOW.md) for the prefilled
+recording-sample workflow, removed timestamp/replay confirmation steps, and
+the distinction between estimated timings and a confirmed description.
+
 See [INSTRUMENT_EVIDENCE.md](INSTRUMENT_EVIDENCE.md) for the current v2 behavior:
 short clips receive sample/context sound estimates, repeated source intervals
 share a source description, and DTW uses content and slope safeguards. The

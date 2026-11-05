@@ -45,6 +45,7 @@ let config,
   instrumentBusy = false,
   instrumentMessage = "",
   instrumentError = "";
+let sampleFlow = true, sampleSuggestion = null;
 const titles = [
   "Your tracks",
   "Finding your sample",
@@ -75,10 +76,12 @@ function button(label, action, primary = false) {
   return `<button data-action="${action}" class="${primary ? "primary" : ""}">${label}</button>`;
 }
 function frame(content) {
+  const visibleTitles = sampleFlow ? titles.filter((_, index) => index !== 2) : titles;
+  const visibleStep = sampleFlow && step > 2 ? step - 1 : step;
   $("#progress").innerHTML =
     step < 0
       ? ""
-      : `STEP ${step + 1} OF 7 · ${titles[step]}<div class="bar"><span style="width:${((step + 1) / 7) * 100}%"></span></div>`;
+      : `STEP ${visibleStep + 1} OF ${visibleTitles.length} · ${visibleTitles[visibleStep]}<div class="bar"><span style="width:${((visibleStep + 1) / visibleTitles.length) * 100}%"></span></div>`;
   $("#view").innerHTML = content;
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -86,7 +89,7 @@ function field(label, key, value = "", placeholder = "") {
   return `<label>${label}<input data-field="${key}" value="${esc(value)}" placeholder="${esc(placeholder)}"></label>`;
 }
 function nav(next) {
-  return `<div class="stepNav">${step > 2 ? button("← Back", "back") : button("New Sample", "new")}${button(next, "next", true)}</div>`;
+  return `<div class="stepNav">${step > (sampleFlow ? 3 : 2) ? button("← Back", "back") : button("New Sample", "new")}${button(next, "next", true)}</div>`;
 }
 function creditsFrom(name) {
   const stem = name.replace(/\.[^.]+$/, "");
@@ -125,6 +128,8 @@ async function json(path, options) {
   return (await api(path, options)).json();
 }
 function reset() {
+  sampleFlow = true;
+  sampleSuggestion = null;
   polling++;
   for (const url of Object.values(audioUrls)) URL.revokeObjectURL(url);
   audioUrls = {};
@@ -160,7 +165,7 @@ function render() {
   }
   if (step === 0) {
     frame(
-      `<h1>Start with the music.</h1><p class="muted">Add the original and your track. We’ll fill in recognizable titles and artists, check both types of reuse, and show you the suggested moments.</p><div class="grid">${["original", "new"].map((role) => `<div><h2>${role === "original" ? "The original" : "Your track"}</h2><label>Audio file<input data-file="${role}" type="file" accept=".mp3,.wav,.flac,.m4a,.ogg"></label><small>Up to 100 MB · maximum 10 minutes</small>${field("Title", role + "_title")}${field("Artist", role + "_artist")}</div>`).join("")}</div><p class="warning">We check recording samples and separately replayed music. Checking both does not mean both happened—you can rule out either after listening.</p><div class="actions">${button("Find my sample →", "analyze", true)}</div><small>Up to 3 requests per person and 20 shared requests daily, including optional instrument checks.</small>`,
+      `<h1>Start with the music.</h1><p class="muted">Add the original and your track. We’ll find the recording sample and fill in its description for you to confirm or edit.</p><div class="grid">${["original", "new"].map((role) => `<div><h2>${role === "original" ? "The original" : "Your track"}</h2><label>Audio file<input data-file="${role}" type="file" accept=".mp3,.wav,.flac,.m4a,.ogg"></label><small>Up to 100 MB · maximum 10 minutes</small>${field("Title", role + "_title")}${field("Artist", role + "_artist")}</div>`).join("")}</div><div class="actions">${button("Find my sample →", "analyze", true)}</div><small>Up to 3 requests per person and 20 shared requests daily, including optional instrument checks.</small>`,
     );
     return;
   }
@@ -171,6 +176,24 @@ function render() {
     return;
   }
   if (!analysis) return;
+  if (sampleFlow && step === 3) {
+    if (sampleSuggestion?.status !== "identified") {
+      frame(`<h1>We couldn’t confidently identify the sample.</h1><p class="muted">Try the exact source recording or a different pair. A rough similarity alone is not enough to identify a recording sample.</p>${button("Try another pair", "new", true)}`);
+      return;
+    }
+    const f = forms.master;
+    frame(`<h1>Does this describe your sample?</h1><p class="muted">We’ve filled in the answers from your analysis. Check that they look right, edit anything you want, then confirm the description.</p>
+      <div class="track" data-rights="master"><h2>Your recording sample</h2>${[
+        ["What did you take?", "element"], ["How did you use it?", "method"],
+        ["Does it loop or repeat?", "repetition"], ["What does it do in your track?", "role"],
+        ["Any reused lyrics? (optional)", "lyrics"],
+      ].map(([label, key]) => `${field(label, key, f[key])}${sampleSuggestion.notes[key] ? `<small data-description-note="${key}">${esc(sampleSuggestion.notes[key])}</small>` : ""}`).join("")}</div>
+      ${sampleEvidence()}${nav("Confirm description & continue →")}`);
+    $("#sampleEvidence").addEventListener("toggle", (event) => {
+      if (event.target.open) loadAudio().catch(error => notice(error.message));
+    });
+    return;
+  }
   if (step === 2) {
     frame(
       `<h1>Listen & check.</h1><p class="muted">Accept the moments you hear, or unlock the table to correct them. Original-track times may be unavailable for fallback estimates.</p><p class="muted">Used the original audio without recording a separate replay? Confirm the recording sample, accept its times, and choose “No separate replay or re-sung part” below. You do not need timestamps for a use that did not happen.</p><div class="grid"><div><h3>The original</h3><audio controls id="originalPlayer"></audio></div><div><h3>Your track</h3><audio controls id="newPlayer"></audio></div></div>${(analysis.warnings || []).map((w) => `<p class="warning">${esc(w)}</p>`).join("")}<details><summary>See how the tracks compare</summary><div id="spectral"></div></details>${renderLoopGroups()}${Object.keys(
@@ -199,6 +222,14 @@ function render() {
     return;
   }
   if (step === 4) {
+    if (sampleFlow) {
+      const f = forms.master;
+      const sections = ["matched passages", "whole track", "intro", "verse", "chorus", "bridge", "outro"];
+      frame(`<h1>Does this placement look right?</h1><p class="muted">We’ve suggested where the sample appears. Confirm the placement or edit it. “Matched passages” keeps the detected locations without guessing verse or chorus names.</p>
+        <div class="track" data-rights="master"><div class="checks">${sections.map(s => `<label><input type="checkbox" data-section="${s}" ${f.sections.includes(s) ? "checked" : ""}>${s}</label>`).join("")}</div>
+        <label>Where does it appear overall?<select data-field="placement">${Object.entries(placements).map(([key, label]) => `<option value="${key}" ${f.placement === key ? "selected" : ""}>${label}</option>`).join("")}</select></label></div>${nav("Confirm placement & review draft →")}`);
+      return;
+    }
     frame(
       `<h1>Where does it fit?</h1><p class="muted">Review the suggested placement. Timestamps alone cannot distinguish a chorus from a verse or bridge—choose the sections you hear.</p>${active()
         .map(
@@ -227,6 +258,13 @@ function render() {
   frame(
     `<h1>Your Nature of Use.</h1><p class="muted">A clear account of what you took and how you used it.</p><article class="document">${esc(narrative)}</article><div class="actions">${button("Download HTML", "html", true)}${button("Download text", "text")}</div><details><summary>Supporting analysis</summary>${button("Download analysis JSON", "json")}</details>${nav("Finish")}`,
   );
+}
+function sampleEvidence() {
+  const f = forms.master;
+  return `<details id="sampleEvidence"><summary>Sample matches and instruments</summary><p class="muted">Automatically located matches. Times remain estimates; uncertain endings are marked ≈.</p>
+    <div class="grid"><div><h3>The original</h3><audio controls id="originalPlayer"></audio></div><div><h3>Your track</h3><audio controls id="newPlayer"></audio></div></div>
+    <div class="track" data-rights="master"><div class="tableWrap"><table><thead><tr><th>Your track start</th><th>Your track end</th><th>Original start</th><th>Original end</th></tr></thead><tbody>${f.intervals.map((i, n) => `<tr>${["new_start", "new_end", "original_start", "original_end"].map(key => renderTimeCell(i, key, n, f)).join("")}</tr>`).join("")}</tbody></table></div>
+    <section id="instruments" aria-label="Instrument check">${renderInstruments()}</section></div></details>`;
 }
 function renderLoopGroups() {
   if (!loopFamilies.length) return "";
@@ -279,6 +317,9 @@ function currentInstrumentRows() {
   );
 }
 function instrumentTimesChanged() {
+  // The sample flow uses server-owned times, including a supported subset of
+  // the raw candidates. A subset is not a timestamp edit to save first.
+  if (sampleFlow) return false;
   const intervals = forms.master?.intervals || [];
   return (
     intervals.length !== instrumentRows.length ||
@@ -320,6 +361,7 @@ function instrumentTable() {
 function applyInstrumentPrefill() {
   const f = forms.master;
   if (!f || f.status === "no_use") return;
+  if (sampleFlow && f.description_confirmed) return;
   const labels = [
     ...new Set(
       f.intervals.flatMap((i) => {
@@ -328,8 +370,8 @@ function applyInstrumentPrefill() {
       }),
     ),
   ];
-  const suggestions = { element: labels.join(", ") };
-  if (labels.length) suggestions.method = "Sampled the original recording";
+  const suggestions = sampleFlow ? sampleSuggestion?.description || {} : { element: labels.join(", ") };
+  if (!sampleFlow && labels.length) suggestions.method = "Sampled the original recording";
   for (const [field, value] of Object.entries(suggestions)) {
     if (
       !touchedSoundFields.has(field) &&
@@ -345,6 +387,9 @@ function applyInstrumentPrefill() {
       if (input) input.value = f[field];
     }
   }
+  if (sampleFlow) document.querySelectorAll("[data-description-note]").forEach(note => {
+    note.textContent = sampleSuggestion.notes[note.dataset.descriptionNote] || "";
+  });
 }
 function renderInstruments() {
   const rows = currentInstrumentRows();
@@ -393,7 +438,7 @@ async function startInstrumentCheck() {
   updateInstruments();
   try {
     if (instrumentTimesChanged()) {
-      if (!validTimes(forms.master))
+      if (!sampleFlow && !validTimes(forms.master))
         throw Error(
           "Listen and confirm your edited timestamps before checking their instruments.",
         );
@@ -421,6 +466,7 @@ function name(r) {
 function endingReviewNote(interval, confirmed = false) {
   const review = interval.end_review;
   if (!review || confirmed) return "";
+  if (sampleFlow) return '<small class="endingReview" data-ending-review>Estimated ending: audio may continue beyond the displayed time.</small>';
   return `<small class="endingReview" data-ending-review>Ending unclear. Check around ${esc(formatTime(review.new_through))} in your track and ${esc(formatTime(review.original_through))} in the original. Audio may continue beyond these points; listen for the actual ending before confirming.</small>`;
 }
 function refreshEndingReview(track, form) {
@@ -548,11 +594,11 @@ async function poll({ instruments = false } = {}) {
             : "";
           if (instruments) updateInstruments();
           else {
-            step = 2;
+            step = sampleFlow ? 3 : 2;
             render();
           }
         } else {
-          step = 2;
+          step = sampleFlow ? 3 : 2;
           render();
         }
         return;
@@ -599,11 +645,37 @@ async function loadResult({
   const data = await json(`/api/analyses/${target}/result`);
   if (expectedPoll !== polling || target !== caseId) return false;
   analysis = data.analysis;
+  sampleFlow = !!data.sample_review;
+  sampleSuggestion = data.sample_review || null;
   loopFamilies = data.loop_families || [];
   perMomentSupported = Array.isArray(data.instrument_rows);
   instrumentRows =
     data.instrument_rows || analysis.instrument_occurrences || [];
   const corrected = analysis.review.corrected;
+  if (sampleFlow && !Object.keys(forms).length) {
+    const path = corrected?.master;
+    const suggested = sampleSuggestion.description;
+    const values = sampleSuggestion.placement.values;
+    const saved = analysis.review.description_answers || {};
+    const prior = path ? {
+      element: path.describe.elements.find(x => x.feature === "musical_element")?.value,
+      method: path.describe.reuse_type, repetition: path.describe.repetition,
+      role: path.describe.role_in_new_song,
+      lyrics: path.describe.elements.find(x => x.feature === "lyrics")?.value,
+    } : {};
+    forms.master = {
+      ...suggested, ...Object.fromEntries(Object.entries(prior).filter(([, value]) => value != null)), ...saved,
+      status: "confirmed", times_confirmed: false,
+      description_confirmed: !!path && !path.locate.review_required,
+      details_confirmed: !!path && !path.locate.review_required,
+      intervals: sampleSuggestion.intervals,
+      sections: path?.describe.sections ?? values.sections ?? [],
+      placement: path?.classification.placement ?? values.placement ?? null,
+      edit: false,
+    };
+    autoSoundFields = { ...suggested };
+    if (path) Object.keys(suggested).forEach(field => touchedSoundFields.add(field));
+  }
   if (!Object.keys(forms).length) {
     for (const r of analysis.input.analysis_scope) {
       const path = corrected?.[r];
@@ -678,6 +750,15 @@ function validTimes(f) {
   );
 }
 function gate() {
+  if (sampleFlow) {
+    if (step === 3 && (sampleSuggestion?.status !== "identified" ||
+      ["element", "method", "repetition", "role"].some(key => !forms.master[key]?.trim())))
+      throw Error("Review the prefilled sound, method, repetition and role before confirming.");
+    if (step === 4 && (!forms.master.sections.length || !forms.master.placement))
+      throw Error("Choose a placement, or keep the suggested matched passages.");
+    if (step === 5 && !approved) throw Error("Mark the document as reviewed before downloading.");
+    return;
+  }
   if (step === 2) {
     const pending = Object.keys(forms).filter(
       (r) => forms[r].status === "pending",
@@ -735,9 +816,17 @@ function gate() {
     throw Error("Mark the document as reviewed before downloading.");
 }
 async function save(approve = false) {
-  const target = caseId,
-    serial = polling;
+  const target = caseId;
+  if (sampleFlow && instrumentBusy) {
+    notice("Your answers are kept. Finishing the instrument check before saving your draft…");
+    while (instrumentBusy && target === caseId && user)
+      await new Promise(resolve => setTimeout(resolve, 250));
+    if (target !== caseId || !user) return false;
+    notice("");
+  }
+  const serial = polling;
   const payload = {
+    workflow: sampleFlow ? "sample" : "classic",
     paths: Object.fromEntries(
       Object.entries(forms).map(([r, f]) => [
         r,
@@ -757,7 +846,7 @@ async function save(approve = false) {
           ].map((k) => [
             k,
             k === "intervals"
-              ? f.intervals.map((i) => ({
+              ? sampleFlow ? [] : f.intervals.map((i) => ({
                   new_start: i.new_start,
                   new_end: i.new_end,
                   original_start: i.original_start ?? null,
@@ -816,6 +905,11 @@ $("#view").addEventListener("input", (e) => {
     if (el.dataset.field === "times_confirmed")
       refreshEndingReview(el.closest(".track"), forms[r]);
     if (r === "master") touchedSoundFields.add(el.dataset.field);
+    if (sampleFlow) {
+      forms[r].details_confirmed = false;
+      if (["element", "method", "repetition", "role", "lyrics"].includes(el.dataset.field))
+        forms[r].description_confirmed = false;
+    }
     approved = false;
   }
   if (r && el.dataset.interval) {
@@ -868,6 +962,8 @@ $("#view").addEventListener("change", (e) => {
       forms[r].sections = ["whole track"];
     else if (el.dataset.section !== "whole track" && el.checked)
       forms[r].sections = forms[r].sections.filter((x) => x !== "whole track");
+    if (sampleFlow && el.checked) forms[r].sections = el.dataset.section === "matched passages"
+      ? ["matched passages"] : forms[r].sections.filter(x => x !== "matched passages");
     const joined = forms[r].sections.sort().join(",");
     forms[r].placement =
       {
@@ -912,7 +1008,16 @@ $("#view").addEventListener("click", async (e) => {
       render();
     } else if (action === "next") {
       gate();
-      if (step === 4) await save();
+      if (sampleFlow && step === 3) {
+        forms.master.description_confirmed = true;
+        ["element", "method", "repetition", "role", "lyrics"].forEach(field => touchedSoundFields.add(field));
+      }
+      if (sampleFlow && step === 4) forms.master.details_confirmed = true;
+      if (step === 4) {
+        el.disabled = true;
+        try { if (!(await save())) return; }
+        finally { if (el.isConnected) el.disabled = false; }
+      }
       if (step === 6) {
         reset();
         return;

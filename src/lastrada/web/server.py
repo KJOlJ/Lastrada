@@ -255,9 +255,11 @@ def create_app(cases=None, queue=None, authenticate_user=None, mode=None):
         from lastrada.reporting.document import missing_document_inputs
         from lastrada.separation.occurrences import occurrence_rows, instrument_prefill
         from lastrada.reporting.loop_groups import group_loop_families, loop_family_rows
+        from lastrada.reporting.sample_flow import sample_review
 
         return {
             "analysis": value.model_dump(mode="json"),
+            "sample_review": sample_review(value, PROFILE["stem_model"]),
             "missing": missing_document_inputs(value),
             "instrument_rows": [
                 row.model_dump(mode="json") for row in occurrence_rows(value, PROFILE["stem_model"])

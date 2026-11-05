@@ -4,8 +4,10 @@ from lastrada.alignment.intervals import coverage
 
 
 def reviewed_copy(
-    automated: Analysis, paths: dict, text: str, reviewer: str, approve=False, notes=""
+    automated: Analysis, paths: dict, text: str, reviewer: str, approve=False, notes="",
+    workflow="classic",
 ):
+    from lastrada.reporting.sample_flow import automatic_path, sample_intervals
     if approve and not reviewer.strip():
         raise ValueError("A reviewer name is required for approval")
     corrected = automated.model_copy(deep=True)
@@ -15,6 +17,9 @@ def reviewed_copy(
         path = PathResult.model_validate(value)
         if path.rights_type != rights:
             raise ValueError("Rights path mismatch")
+        if automatic_path(path):
+            if rights != "master" or workflow != "sample" or path.locate.sample_occurrences != sample_intervals(automated):
+                raise ValueError("Automatic times must retain supported detector evidence")
         for interval in path.locate.sample_occurrences + path.locate.measurement_intervals:
             if interval.new_end > automated.durations["new"] + 1e-6:
                 raise ValueError("Interval exceeds the new recording")
@@ -39,7 +44,9 @@ def reviewed_copy(
     if approve:
         for rights in automated.input.analysis_scope:
             path = getattr(corrected, rights)
-            if path.locate.detection_status not in ("verified", "not_detected"):
+            if workflow == "sample" and rights != "master" and path.locate.detection_status == "not_requested":
+                continue
+            if path.locate.detection_status not in ("verified", "not_detected") and not automatic_path(path):
                 raise ValueError(f"{rights}: resolve uncertain reuse before approval")
             if path.locate.review_required or path.classification.review_required:
                 raise ValueError(f"{rights}: confirm findings and classification before approval")
@@ -51,6 +58,7 @@ def reviewed_copy(
     payload = corrected.model_dump(mode="json", exclude={"review"})
     result = automated.model_copy(deep=True)
     result.review = Review(
+        workflow=workflow,
         status="approved" if approve else "edited",
         reviewer=reviewer or None,
         reviewed_at=datetime.now(timezone.utc).isoformat(),

@@ -35,6 +35,7 @@ function python(mode, body) {
     jobError = null;
   const instrumentScenario = process.env.LASTRADA_BROWSER_STEMS;
   const endingScenario = process.env.LASTRADA_BROWSER_ENDING;
+  const sampleScenario = process.env.LASTRADA_BROWSER_SAMPLE_FLOW;
   if (instrumentScenario && instrumentScenario !== "no_source") {
     const interval = {
       new_start: 1,
@@ -128,6 +129,8 @@ function python(mode, body) {
   });
   try {
     const p = await b.newPage({ viewport: { width: 1360, height: 1000 } });
+    if (sampleScenario?.startsWith("automatic"))
+      await p.addInitScript(() => { window.__LASTRADA_FORCE_AUTO_INSTRUMENTS__ = true; });
     const errors = [];
     p.on("pageerror", (e) => errors.push(e.message));
     await p.route(
@@ -223,7 +226,10 @@ function python(mode, body) {
           job = "queued";
           result = { status: job, operation };
         }
-      } else if (u.pathname.endsWith("/result")) result = data;
+      } else if (u.pathname.endsWith("/result")) {
+        if (sampleScenario) data.sample_review = JSON.parse(python("sample", { analysis: data.analysis }));
+        result = data;
+      }
       else if (u.pathname.endsWith("/review")) {
         try {
           data.analysis = JSON.parse(
@@ -365,6 +371,11 @@ function python(mode, body) {
     await p
       .getByRole("button", { name: "Find my sample →", exact: true })
       .click();
+    if (sampleScenario) {
+      await require("./sample-flow-checks.cjs")(p, data, sampleScenario, errors);
+      console.log(`Sample workflow passed: ${sampleScenario}; API requests: ${requests}`);
+      return;
+    }
     await p
       .getByRole("heading", { name: "Listen & check.", exact: true })
       .waitFor();

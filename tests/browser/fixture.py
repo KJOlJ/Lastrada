@@ -11,6 +11,7 @@ from lastrada.reporting.document import document_html, document_text
 from lastrada.separation.occurrences import occurrence_rows, instrument_prefill
 from lastrada.reporting.loop_groups import group_loop_families, loop_family_rows
 from lastrada.web.profile import PROFILE
+from lastrada.reporting.sample_flow import sample_review
 
 
 def initial():
@@ -24,6 +25,23 @@ def initial():
     analysis.master.locate.measurement_intervals = [
         Interval(new_start=1, new_end=4, source="pfnmf")
     ]
+    sample_scenario = os.getenv("LASTRADA_BROWSER_SAMPLE_FLOW")
+    if sample_scenario:
+        analysis.input.analysis_scope = ["master"]
+        analysis.master.locate.sample_occurrences = [Interval(
+            new_start=8, new_end=12, original_start=2, original_end=6,
+            source="sampleid_rank_sequence" if sample_scenario == "no_match" else "direct_waveform_local_alignment",
+            status="candidate", end_review={"new_through": 12.5, "original_through": 6.5},
+        )]
+        if sample_scenario == "automatic_subset":
+            analysis.master.locate.sample_occurrences.append(Interval(
+                new_start=1, new_end=3, original_start=10, original_end=12,
+                source="sampleid_rank_sequence", status="candidate",
+            ))
+        analysis.instrument_occurrences = occurrence_rows(analysis, PROFILE["stem_model"])
+        for row in analysis.instrument_occurrences:
+            row.status = "pending" if sample_scenario.startswith("automatic") else "checked"
+            row.suggested_instruments = ["Guitar"] if sample_scenario == "prefilled" else []
     if os.getenv("LASTRADA_BROWSER_ENDING"):
         analysis.master.locate.sample_occurrences = [
             Interval(
@@ -48,7 +66,7 @@ def initial():
             Path(os.environ["LASTRADA_BROWSER_ANALYSIS"]).read_text()
         )
         intake = analysis.input
-    return {
+    result = {
         "analysis": analysis.model_dump(mode="json"),
         "instrument_rows": [
             r.model_dump(mode="json") for r in occurrence_rows(analysis, PROFILE["stem_model"])
@@ -69,6 +87,9 @@ def initial():
             for r in intake.analysis_scope
         },
     }
+    if sample_scenario:
+        result["sample_review"] = sample_review(analysis, PROFILE["stem_model"])
+    return result
 
 
 if __name__ == "__main__":
@@ -78,7 +99,9 @@ if __name__ == "__main__":
     else:
         body = json.load(sys.stdin)
         analysis = Analysis.model_validate(body["analysis"])
-        if mode == "review":
+        if mode == "sample":
+            print(json.dumps(sample_review(analysis, PROFILE["stem_model"])))
+        elif mode == "review":
             print(
                 apply_review(
                     analysis, ReviewPayload.model_validate(body["payload"])

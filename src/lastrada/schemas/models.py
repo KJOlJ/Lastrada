@@ -146,6 +146,7 @@ class Locate(StrictModel):
     coverage_percentage: float | None = Field(default=None, ge=0, le=100)
     pitch_shift_semitones: float | None = None
     review_required: bool = True
+    timing_source: Literal["automated", "reviewed"] | None = None
 
     @model_validator(mode="after")
     def detection_consistency(self):
@@ -196,6 +197,8 @@ class Narrative(StrictModel):
 
 
 class Review(StrictModel):
+    workflow: Literal["classic", "sample"] = "classic"
+    description_answers: dict[str, str] = Field(default_factory=dict)
     status: Literal["pending", "edited", "approved"] = "pending"
     reviewer: str | None = None
     reviewed_at: str | None = None

@@ -336,3 +336,47 @@ def test_short_cued_instrument_job_remains_readable_reviewable_and_exportable(
             assert corrected["ending_review_context"] == interval.end_review.model_dump()
         else:
             assert "NATURE OF USE" in response.text.upper()
+
+
+def test_sample_description_flow_api_confirms_description_without_timestamp_or_replay_questions(service):
+    from lastrada.schemas.models import Analysis, Intake, Interval, Work
+
+    client, cases, _ = service
+    headers = {"Authorization": "Bearer alice", "Origin": "https://lastrada-64bab.web.app"}
+    analysis_id = client.post("/api/analyses", json=payload(), headers=headers).json()["id"]
+    root = prefix(owner_key("Bearer alice"), analysis_id)
+    state, _ = cases.read(root + "/case.json")
+    state["status"] = "completed"
+    cases.write(root + "/case.json", state)
+    analysis = Analysis(case_id=analysis_id, input=Intake(
+        case_id=analysis_id, original_work=Work(title="Original", artist="Test"),
+        new_work=Work(title="New", artist="Test"), analysis_scope=["master"],
+    ), durations={"new": 40, "original": 20})
+    analysis.master.locate.sample_occurrences = [Interval(
+        new_start=10, new_end=14, original_start=2, original_end=6,
+        source="dtw_chroma_local_alignment", status="candidate",
+    )]
+    cases.write(root + "/result.json", analysis.model_dump(mode="json"))
+    response = client.get(f"/api/analyses/{analysis_id}/result", headers=headers)
+    assert response.status_code == 200
+    proposal = response.json()["sample_review"]
+    assert proposal["status"] == "identified" and all(proposal["description"].values())
+    assert client.get(f"/api/analyses/{analysis_id}/export/html", headers=headers).status_code == 409
+    review = {"workflow": "sample", "reviewer": "Creator", "approve": True, "paths": {
+        "master": {"status": "confirmed", "times_confirmed": False, "details_confirmed": True,
+                   **proposal["description"],
+                   "sections": proposal["placement"]["values"]["sections"],
+                   "placement": proposal["placement"]["values"]["placement"]},
+    }}
+    response = client.put(f"/api/analyses/{analysis_id}/review", json=review, headers=headers)
+    assert response.status_code == 200, response.text
+    for kind in ("json", "html", "text"):
+        response = client.get(f"/api/analyses/{analysis_id}/export/{kind}", headers=headers)
+        assert response.status_code == 200, response.text
+        if kind == "json":
+            restored = Analysis.model_validate(response.json())
+            assert restored.review.corrected["master"]["locate"]["timing_source"] == "automated"
+            assert restored.master == analysis.master
+        else:
+            assert "automatically estimated" in response.text
+            assert "No separate replayed" not in response.text
