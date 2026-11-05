@@ -104,6 +104,64 @@ none has a complete, validated interval annotation. The original 3/22 number is
 an automated zero-tolerance paired-start containment check, not a complete human
 timestamp accuracy grade. It has not been rescored here.
 
+## Short-copy follow-up
+
+An independent reconstruction of `cbba3ea` reported better overlap on manufactured
+corpus controls, but 1.25-1.5 second copies could still inherit the entire
+two-second anchor. The follow-up preserves that commit's lag search, acceptance
+threshold and ambiguity check. When the existing half-second extension finds no
+continuation, it checks the anchor backwards in quarter-second blocks and trims
+an unsupported ending only if the remaining prefix still passes the same 0.75
+correlation threshold. At least half a second must remain. Accepted lags and
+candidate count are unchanged; this can only shorten an existing direct match.
+Matches extended beyond the anchor are unchanged. No UI, schema, resource,
+deployment or instrument-classification setting changes are involved.
+
+Checking every anchor block from the start was rejected: quiet/obscured interior
+blocks truncated real longer copies, reducing mean paired IoU from 0.652 to
+0.603 on 576 exploratory controls. The terminal-only check raised it to 0.698
+with the same 400 refinements, but worsened overlap on 23 cases. Both attempts
+and predictions are retained under ignored `outputs/private/short-copy-2026-11-05/`.
+
+The terminal-only code was then frozen and evaluated on fresh source/background
+passages within the same 12 recordings, with different insertion offsets and
+noise seeds. This is a follow-up within known recordings, not an independent
+recording test or real-pair evaluation. Some cases include MP3 re-encoding.
+The baseline below is `cbba3ea`, not the deployed application:
+
+| Frozen follow-up check | `cbba3ea` | Short-copy candidate |
+|---|---:|---:|
+| 396 copies: mean paired IoU | 0.696 | 0.739 |
+| Refined copies | 290/396 | 290/396 |
+| Median worst endpoint error | 0.25 s | 0.10 s |
+| 90th percentile / maximum endpoint error | 7.83 / 8.18 s | 7.83 / 8.18 s |
+| 1.25-second copies (36): mean paired IoU | 0.314 | 0.450 |
+| 1.25-second copies: refinements | 13/36 | 13/36 |
+| 1.5-second copies (36): mean paired IoU | 0.620 | 0.815 |
+| 1.5-second copies: refinements | 28/36 | 28/36 |
+| Noise, reversal, silence, ambiguity and tone controls: refinements | 0/50 | 0/50 |
+
+Paired IoU is the lesser of source/new interval IoU; endpoint error is the largest
+absolute error across their four boundaries. Both include coarse fallbacks.
+All 41 accepted 1.25-1.5-second cases had correct boundaries in this follow-up,
+but 31 retained coarse intervals. The median error for 1.25-second cases therefore
+remained 7.64 seconds. Twelve cases lost overlap: eleven 1.9-second copies changed
+from a 0.10-second overestimate to a 0.15-second underestimate, and one noisy
+two-second copy lost its final 0.25 seconds. Quiet endings can be underestimated;
+quarter-second checks do not establish sample-accurate boundaries. The original
+anchor gate still misses many short or transformed copies, and coarse false
+candidates are not suppressed. Twelve other-recording distractors also produced
+no refinements; they are unannotated and are not counted as known negatives.
+
+All 245 existing Sony proposals from the six actual pairs remained identical
+through direct refinement. The 199 Python tests, Ruff and synthetic smoke passed;
+six short-copy regression cases fail on `cbba3ea` and pass with this correction.
+The standard browser workflow and all nine instrument scenarios also passed,
+including the short-context path, using simulated identity, API transport and
+instrument evidence with real Python review validation. No model inference or
+live deployment was rerun for this follow-up.
+The full corpus is still unavailable in this executor, and 3/22 remains unrescored.
+
 ## Larger corpus protocol
 
 1. Place archives and the supplied manifest under ignored `data/private/` or an

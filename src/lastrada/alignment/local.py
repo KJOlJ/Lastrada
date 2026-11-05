@@ -9,8 +9,9 @@ def refine_candidate(original, new, interval, radius=1.0, minimum_correlation=0.
     """Locate a distinctive anchor, then validate a contiguous matching extension.
 
     The first two seconds establish the lag. Every additional half-second block
-    must independently pass the same correlation threshold; an unmatched gap
-    stops extension. This estimates boundaries, not a verified sampling decision.
+    must independently pass the same correlation threshold. If no continuation
+    matches, quarter-second checks can trim an unsupported anchor ending. This
+    estimates boundaries, not a verified sampling decision.
     """
     if (
         original.sample_rate != new.sample_rate
@@ -69,6 +70,34 @@ def refine_candidate(original, new, interval, radius=1.0, minimum_correlation=0.
         if energy < 1e-10 or float(source_block @ target_block / energy) < minimum_correlation:
             break
         matched_length = block_end
+
+    # An aggregate two-second score can hide the end of a shorter copy. Only
+    # inspect that ending when the existing extension found no continuation;
+    # a brief weak block inside a longer match must not truncate the passage.
+    if matched_length == len(anchor):
+        step = max(1, int(0.25 * sr))
+        boundary = len(anchor)
+        while boundary - step >= sr // 2:
+            source_block = source[boundary - step : boundary].astype(np.float64)
+            target_block = new.samples[offset + boundary - step : offset + boundary].astype(
+                np.float64
+            )
+            energy = np.linalg.norm(source_block) * np.linalg.norm(target_block)
+            if (
+                energy >= 1e-10
+                and float(source_block @ target_block / energy) >= minimum_correlation
+            ):
+                break
+            boundary -= step
+        if boundary < len(anchor):
+            source_prefix = source[:boundary].astype(np.float64)
+            target_prefix = new.samples[offset : offset + boundary].astype(np.float64)
+            energy = np.linalg.norm(source_prefix) * np.linalg.norm(target_prefix)
+            if (
+                energy >= 1e-10
+                and float(source_prefix @ target_prefix / energy) >= minimum_correlation
+            ):
+                matched_length = boundary
 
     start = offset / sr
     return Interval(

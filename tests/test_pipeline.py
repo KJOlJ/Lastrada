@@ -61,7 +61,10 @@ def test_candidate_not_probability(intake):
 
 
 @pytest.mark.parametrize("chunk_seconds,refined", [(1, False), (5, True)])
-def test_direct_search_respects_embedding_window_uncertainty(intake, chunk_seconds, refined):
+@pytest.mark.parametrize("copy_length", [1.25, 4])
+def test_direct_search_respects_embedding_window_uncertainty(
+    intake, chunk_seconds, refined, copy_length
+):
     import numpy as np
     from lastrada.audio.io import Audio
     from lastrada.config import Settings
@@ -69,7 +72,7 @@ def test_direct_search_respects_embedding_window_uncertainty(intake, chunk_secon
     sr = 8000
     source = np.random.default_rng(480).normal(0, 0.2, 4 * sr).astype(np.float32)
     target = np.zeros(12 * sr, dtype=np.float32)
-    target[int(2.75 * sr) : int(6.75 * sr)] = source
+    target[int(2.75 * sr) : int((2.75 + copy_length) * sr)] = source[: int(copy_length * sr)]
     coarse = Interval(
         new_start=0,
         new_end=10,
@@ -93,7 +96,8 @@ def test_direct_search_respects_embedding_window_uncertainty(intake, chunk_secon
     interval = result.master.locate.sample_occurrences[0]
     if refined:
         assert interval.source == "direct_waveform_local_alignment"
-        assert (interval.new_start, interval.new_end) == pytest.approx((2.75, 6.75))
+        assert (interval.new_start, interval.new_end) == pytest.approx((2.75, 2.75 + copy_length))
+        assert (interval.original_start, interval.original_end) == pytest.approx((0, copy_length))
     else:
         assert interval == coarse
     assert result.master.locate.sample_detected is None
