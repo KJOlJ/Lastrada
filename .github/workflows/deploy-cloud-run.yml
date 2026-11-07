@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: cloud-run-lastrada-alt
@@ -22,15 +23,36 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       PROJECT_ID: lastrada-64bab
       REGION: us-central1
-      REPOSITORY: lastrada
+      GHCR_IMAGE: ghcr.io/tankr98/lastrada
     steps:
       - name: Check out backend
         uses: actions/checkout@v4
+
+      - name: Build and publish public backend image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          IMAGE="${GHCR_IMAGE}:${GITHUB_SHA}"
+          echo "LASTRADA_IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+          printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          DOCKER_BUILDKIT=1 docker build \
+            --file deploy/Dockerfile \
+            --label org.opencontainers.image.source=https://github.com/tankr98/Lastrada \
+            --tag "${IMAGE}" \
+            .
+          docker push "${IMAGE}"
+          docker logout ghcr.io
+
+      - name: Verify the image is publicly readable
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${LASTRADA_IMAGE}" >/dev/null
 
       - name: Select Google Cloud credentials
         shell: bash
@@ -50,23 +72,11 @@ jobs:
         with:
           project_id: lastrada-64bab
 
-      - name: Authenticate Docker and Google Cloud
+      - name: Authenticate Google Cloud
         run: |
           set -euo pipefail
           gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
           gcloud config set project "${PROJECT_ID}"
-          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-
-      - name: Build and push backend image
-        run: |
-          set -euo pipefail
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/app:${GITHUB_SHA}"
-          echo "LASTRADA_IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
-          DOCKER_BUILDKIT=1 docker build \
-            --file deploy/Dockerfile \
-            --tag "${IMAGE}" \
-            .
-          docker push "${IMAGE}"
 
       - name: Deploy worker
         run: |
@@ -97,8 +107,8 @@ jobs:
             --project "${PROJECT_ID}" \
             --region "${REGION}" \
             --format='value(spec.template.spec.containers[0].image)')"
-          test "${WORKER_IMAGE}" = "${LASTRADA_IMAGE}"
-          test "${API_IMAGE}" = "${LASTRADA_IMAGE}"
+          case "${WORKER_IMAGE}" in "${GHCR_IMAGE}"*) ;; *) exit 1 ;; esac
+          case "${API_IMAGE}" in "${GHCR_IMAGE}"*) ;; *) exit 1 ;; esac
 
           API_URL="$(gcloud run services describe lastrada-api \
             --project "${PROJECT_ID}" \
