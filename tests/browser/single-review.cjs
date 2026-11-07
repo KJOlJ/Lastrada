@@ -85,6 +85,7 @@ const payload = {
         <section id="view"><h1>What did you use?</h1></section>
         <script>window.__LASTRADA_FORCE_SINGLE_REVIEW__ = true;</script>
         <script type="module" src="/single-review.js"></script>
+        <script type="module" src="/single-review-sync.js"></script>
       </body></html>`);
       return;
     }
@@ -120,6 +121,7 @@ const payload = {
     await page
       .getByRole("heading", { name: "Draft Nature of Use", exact: true })
       .waitFor();
+    await page.getByText("40.0%", { exact: true }).waitFor();
 
     const text = await page.locator("#view").innerText();
     if (!text.includes("40.0%")) throw Error("Coverage statistic missing");
