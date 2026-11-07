@@ -16,11 +16,10 @@ def _audio(seconds=12.0, sample_rate=16000):
     return Audio(samples, sample_rate, seconds)
 
 
-def test_candidate_pairs_are_like_for_like_only():
+def test_candidate_pairs_are_like_for_like_separated_stems_only():
     source = {"full_mix", "guitar", "other", "vocals", "drums"}
     derivative = {"full_mix", "guitar", "other", "vocals", "drums"}
     expected = [
-        ("full_mix", "full_mix"),
         ("guitar", "guitar"),
         ("drums", "drums"),
         ("vocals", "vocals"),
@@ -28,13 +27,14 @@ def test_candidate_pairs_are_like_for_like_only():
     ]
 
     assert candidate_stem_pairs(source, derivative) == expected
-    # The compatibility flag can no longer re-enable cross-stem compute.
+    # The compatibility flag can no longer re-enable cross-stem or full-mix work.
     assert candidate_stem_pairs(
         source,
         derivative,
         include_cross_other=True,
     ) == expected
     assert all(left == right for left, right in expected)
+    assert all(left != "full_mix" for left, _right in expected)
 
 
 def test_demucs_segment_is_normalized_for_integer_only_cli(monkeypatch, tmp_path):
