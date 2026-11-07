@@ -11,7 +11,7 @@ def test_main_worker_runs_grouped_stems_before_marking_analysis_complete():
     completed = source.index('status="completed"', grouped_stems)
 
     assert sony < grouped_stems < completed
-    assert "one representative per grouped timestamp relationship" in source
+    assert "One representative pair is selected per grouped timestamp relationship" in source
     assert "budget_seconds=900" in source
 
 
