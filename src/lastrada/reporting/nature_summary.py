@@ -11,9 +11,18 @@ from lastrada.schemas.models import Analysis
 
 
 def _accepted_stem_matches(analysis: Analysis):
-    grouped = defaultdict(lambda: {"moments": set(), "ratios": []})
+    grouped = defaultdict(lambda: {"groups": {}, "ratios": []})
+    try:
+        from lastrada.separation.occurrences import relationship_groups
 
-    def add(evidence, moment):
+        group_counts = {
+            group.group_id: len(group.occurrences)
+            for group in relationship_groups(analysis)
+        }
+    except (ImportError, TypeError, ValueError):
+        group_counts = {}
+
+    def add(evidence, group_key, represented_uses=1):
         source = str(evidence.source_stem).lower()
         derivative = str(evidence.new_song_stem).lower()
         if (
@@ -22,14 +31,18 @@ def _accepted_stem_matches(analysis: Analysis):
             or source == "full_mix"
         ):
             return
-        grouped[source]["moments"].add(moment)
+        grouped[source]["groups"][group_key] = max(
+            grouped[source]["groups"].get(group_key, 0),
+            max(1, int(represented_uses)),
+        )
         if evidence.duration_ratio is not None:
             grouped[source]["ratios"].append(float(evidence.duration_ratio))
 
     for index, row in enumerate(analysis.instrument_occurrences):
-        moment = row.occurrence_id or f"occurrence-{index + 1}"
+        group_key = row.occurrence_id or f"group-{index + 1}"
+        represented_uses = group_counts.get(group_key, 1)
         for evidence in row.evidence:
-            add(evidence, moment)
+            add(evidence, group_key, represented_uses)
 
     if not grouped:
         for index, evidence in enumerate(analysis.stem_evidence):
@@ -41,7 +54,7 @@ def _accepted_stem_matches(analysis: Analysis):
         result.append(
             {
                 "stem": stem,
-                "moment_count": len(values["moments"]),
+                "moment_count": sum(values["groups"].values()),
                 "duration_ratio": median(ratios) if ratios else None,
             }
         )

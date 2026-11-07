@@ -50,6 +50,10 @@ def execute(owner, analysis_id, operation, task_id):
     from lastrada.schemas.models import Intake, Work, Analysis
     from lastrada.reporting.comparison import spectral_view, comparison_figure
     from lastrada.recognition.sampleid_adapter import SampleIDAdapter
+    from lastrada.separation.occurrences import (
+        instrument_progress,
+        run_occurrence_instruments,
+    )
 
     repo = Cases()
     root = prefix(owner, analysis_id)
@@ -58,6 +62,7 @@ def execute(owner, analysis_id, operation, task_id):
         return
     state.update(status="running", started=time.time())
     repo.write(root + "/case.json", state, generation)
+
     with tempfile.TemporaryDirectory() as folder:
         paths = {}
         for role in ("original", "new"):
@@ -65,24 +70,30 @@ def execute(owner, analysis_id, operation, task_id):
             repo.download(root + f"/{role}", paths[role])
         original = decode(paths["original"].read_bytes())
         new = decode(paths["new"].read_bytes())
-        settings = Settings(stem_enabled=False, stem_max_candidates=1, stem_model_name="htdemucs")
+        settings = Settings(
+            stem_enabled=False,
+            stem_max_candidates=1,
+            stem_model_name="htdemucs",
+        )
+
+        def save_group_stems(partial):
+            repo.write(root + "/result.json", partial.model_dump(mode="json"))
+            current, revision = repo.read(root + "/case.json")
+            if current.get("task_id") == task_id:
+                current["instrument_progress"] = instrument_progress(partial)
+                repo.write(root + "/case.json", current, revision)
+
         if operation == "stems":
+            # Legacy/manual requests now reuse the same grouped representative
+            # implementation. The production browser no longer launches this route.
             data, _ = repo.read(root + "/result.json")
             result = Analysis.model_validate(data)
-            from lastrada.separation.occurrences import (
-                run_occurrence_instruments,
-                instrument_progress,
-            )
-
-            def save_instruments(partial):
-                repo.write(root + "/result.json", partial.model_dump(mode="json"))
-                current, revision = repo.read(root + "/case.json")
-                if current.get("task_id") == task_id:
-                    current["instrument_progress"] = instrument_progress(partial)
-                    repo.write(root + "/case.json", current, revision)
-
             result = run_occurrence_instruments(
-                result, original, new, settings, on_progress=save_instruments
+                result,
+                original,
+                new,
+                settings,
+                on_progress=save_group_stems,
             )
         else:
             credits = state["credits"]
@@ -98,7 +109,7 @@ def execute(owner, analysis_id, operation, task_id):
                     artist=credits["new_artist"],
                     audio_file=state["uploads"]["new"]["name"],
                 ),
-                # The web product now assumes the uploaded source master was sampled.
+                # The web product assumes the uploaded source master was sampled.
                 # Publishing and replay analysis remain available in the core library,
                 # but are intentionally outside this streamlined client workflow.
                 analysis_scope=["master"],
@@ -115,10 +126,21 @@ def execute(owner, analysis_id, operation, task_id):
                     "Sony matching is unavailable; displayed times are PF-NMF fallback "
                     "estimates. Original-track positions may be unknown."
                 )
-            result = analyze_pair(intake, original, new, adapter=adapter, settings=settings)
+
+            # Sony plus full-mix DTW first establishes candidate timestamp
+            # relationships. The optional pipeline-level stem refinement remains off
+            # because grouped representative stem evidence runs immediately below.
+            result = analyze_pair(
+                intake,
+                original,
+                new,
+                adapter=adapter,
+                settings=settings,
+            )
             adapter = None
             if warning:
                 result.warnings.append(warning)
+
             comparison = comparison_figure(
                 spectral_view(original),
                 spectral_view(new),
@@ -126,10 +148,30 @@ def execute(owner, analysis_id, operation, task_id):
                 or result.master.locate.measurement_intervals,
             )
             repo.write(root + "/comparison.json", json.loads(comparison.to_json()))
+
+            # Complete Demucs and same-stem DTW inside the original analysis job.
+            # One representative pair is selected per grouped timestamp relationship,
+            # so the timestamp page is not released and does not launch more compute.
+            result = run_occurrence_instruments(
+                result,
+                original,
+                new,
+                settings,
+                on_progress=save_group_stems,
+                budget_seconds=900,
+                max_new_checks=20,
+            )
+
         repo.write(root + "/result.json", result.model_dump(mode="json"))
+
     state, generation = repo.read(root + "/case.json")
     if state.get("task_id") == task_id:
-        state.update(status="completed", completed=time.time(), error=None)
+        state.update(
+            status="completed",
+            completed=time.time(),
+            error=None,
+            instrument_progress=instrument_progress(result),
+        )
         repo.write(root + "/case.json", state, generation)
 
 

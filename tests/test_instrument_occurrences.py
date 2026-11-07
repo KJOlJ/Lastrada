@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+
 from lastrada.config import Settings
 from lastrada.schemas.models import Analysis, Intake, Work, Interval, StemEvidence
 from lastrada.separation import occurrences as instruments
@@ -9,13 +10,47 @@ def sample():
         case_id="test",
         original_work=Work(title="Source", artist="Test"),
         new_work=Work(title="Mix", artist="Test"),
-        analysis_scope=["master", "publishing"],
+        analysis_scope=["master"],
     )
-    result = Analysis(case_id="test", input=intake, durations={"new": 40, "original": 40})
+    result = Analysis(
+        case_id="test",
+        input=intake,
+        durations={"new": 40, "original": 40},
+    )
     result.master.locate.sample_occurrences = [
-        Interval(new_start=0, new_end=4, original_start=0, original_end=4, source="sampleid"),
-        Interval(new_start=10, new_end=14, original_start=5, original_end=9, source="sampleid"),
-        Interval(new_start=20, new_end=21, original_start=0, original_end=4, source="sampleid"),
+        Interval(
+            new_start=0,
+            new_end=4,
+            original_start=0,
+            original_end=4,
+            source="sampleid",
+            similarity=0.6,
+        ),
+        Interval(
+            new_start=20,
+            new_end=24,
+            original_start=0,
+            original_end=4,
+            source="sampleid",
+            similarity=0.9,
+        ),
+        # Overlapping detector window for the same derivative occurrence.
+        Interval(
+            new_start=20.2,
+            new_end=24.2,
+            original_start=0,
+            original_end=4,
+            source="sampleid",
+            similarity=0.4,
+        ),
+        Interval(
+            new_start=10,
+            new_end=14,
+            original_start=5,
+            original_end=9,
+            source="sampleid",
+            similarity=0.8,
+        ),
         Interval(new_start=25, new_end=30, source="pfnmf"),
     ]
     return result
@@ -34,7 +69,25 @@ def evidence(stem, accepted=True):
     )
 
 
-def test_each_moment_keeps_own_evidence_and_resumes_without_reprocessing(monkeypatch):
+def test_relationship_groups_collapse_duplicates_and_choose_best_representative():
+    groups = instruments.relationship_groups(sample())
+
+    assert len(groups) == 3
+    repeated = groups[0]
+    assert len(repeated.occurrences) == 2
+    assert repeated.representative.new_start == 20
+    assert repeated.representative.similarity == 0.9
+    assert "highest Sony similarity" in repeated.representative_selection
+
+    rows = instruments.occurrence_rows(sample())
+    assert len(rows) == 3
+    assert rows[0].interval.new_start == 20
+    assert rows[0].status == "pending"
+    assert "2 grouped use(s)" in rows[0].reason
+    assert rows[2].status == "no_source"
+
+
+def test_one_representative_per_group_and_resumes_without_reprocessing(monkeypatch):
     result = sample()
     original = result.model_dump()
     calls, saves = [], []
@@ -47,7 +100,7 @@ def test_each_moment_keeps_own_evidence_and_resumes_without_reprocessing(monkeyp
         return SimpleNamespace(
             evidence=[
                 evidence("full_mix"),
-                evidence("bass" if probe.new_start < 5 else "drums"),
+                evidence("bass" if probe.new_start >= 20 else "drums"),
                 evidence("vocals", False),
             ]
         )
@@ -60,57 +113,78 @@ def test_each_moment_keeps_own_evidence_and_resumes_without_reprocessing(monkeyp
         Settings(),
         separator=SimpleNamespace(),
         max_new_checks=1,
-        on_progress=lambda r: saves.append(r.model_dump()),
+        on_progress=lambda value: saves.append(value.model_dump()),
     )
-    assert [r.status for r in first.instrument_occurrences] == [
+    assert calls == [20]
+    assert [row.status for row in first.instrument_occurrences] == [
         "checked",
-        "pending",
-        "too_short",
+        "failed",
         "no_source",
     ]
     assert first.instrument_occurrences[0].suggested_instruments == ["Bass"]
-    assert not first.instrument_occurrences[1].suggested_instruments
-    assert not instruments.instrument_check_complete(first)
-    second = instruments.run_occurrence_instruments(
-        first, None, None, Settings(), separator=SimpleNamespace()
+    assert "2 grouped use(s)" in first.instrument_occurrences[0].reason
+    assert instruments.instrument_check_complete(first)
+
+    # A full integrated run checks each eligible group once.
+    complete = instruments.run_occurrence_instruments(
+        result,
+        None,
+        None,
+        Settings(),
+        separator=SimpleNamespace(),
+        on_progress=lambda value: saves.append(value.model_dump()),
     )
-    assert calls == [0, 10]
-    assert second.instrument_occurrences[1].suggested_instruments == ["Drums"]
-    assert instruments.instrument_check_complete(second)
-    assert instruments.instrument_prefill(second)["element"] == "Bass, Drums"
-    assert "role" not in instruments.instrument_prefill(second)
-    assert "lyrics" not in instruments.instrument_prefill(second)
-    assert second.master == result.master and second.review == result.review
+    assert calls == [20, 20, 10]
+    assert complete.instrument_occurrences[0].suggested_instruments == ["Bass"]
+    assert complete.instrument_occurrences[1].suggested_instruments == ["Drums"]
+    assert instruments.instrument_prefill(complete)["element"] == "Bass, Drums"
+    assert "role" not in instruments.instrument_prefill(complete)
+    assert "lyrics" not in instruments.instrument_prefill(complete)
+    assert complete.master == result.master and complete.review == result.review
     assert result.model_dump() == original
     assert len(saves) >= 2
+
     instruments.run_occurrence_instruments(
-        second, None, None, Settings(), separator=SimpleNamespace()
+        complete,
+        None,
+        None,
+        Settings(),
+        separator=SimpleNamespace(),
     )
-    assert calls == [0, 10]
-    # Edited timing gets a new identity and cannot inherit an instrument label.
-    second.master.locate.sample_occurrences[0].new_end = 3
-    assert instruments.occurrence_rows(second)[0].status == "pending"
-    assert instruments.instrument_prefill(second)["element"] == "Drums"
+    assert calls == [20, 20, 10]
 
 
-def test_legacy_single_probe_is_never_applied_to_other_timestamps():
+def test_legacy_single_probe_can_seed_matching_group_but_not_other_groups():
     result = sample()
-    result.stem_evidence = [
-        StemEvidence(
-            candidate_number=1,
-            source_stem="bass",
-            new_song_stem="bass",
-            dtw_result="accepted",
-            interpretation="legacy",
-            reason="one probe",
-        )
-    ]
-    assert instruments.occurrence_rows(result)[0].status == "pending"
-    assert instruments.instrument_prefill(result) == {}
+    first_interval = result.master.locate.sample_occurrences[1]
+    legacy = instruments.InstrumentOccurrence(
+        occurrence_id=instruments.occurrence_id(first_interval),
+        candidate_number=1,
+        interval=first_interval,
+        status="checked",
+        suggested_instruments=["Bass"],
+        evidence=[
+            StemEvidence(
+                candidate_number=1,
+                source_stem="bass",
+                new_song_stem="bass",
+                dtw_result="accepted",
+                interpretation="legacy",
+                reason="one probe",
+            )
+        ],
+    )
+    result.instrument_occurrences = [legacy]
+
+    rows = instruments.occurrence_rows(result)
+    assert rows[0].status == "checked"
+    assert rows[0].suggested_instruments == ["Bass"]
+    assert rows[1].status == "pending"
+    assert instruments.instrument_prefill(result)["element"] == "Bass"
     assert not instruments.instrument_check_complete(result)
 
 
-def test_download_failure_is_saved_once_and_stops_the_batch(monkeypatch):
+def test_download_failure_is_saved_once_and_finalizes_remaining_groups(monkeypatch):
     calls = []
 
     def fail(*args, **kwargs):
@@ -119,25 +193,38 @@ def test_download_failure_is_saved_once_and_stops_the_batch(monkeypatch):
 
     monkeypatch.setattr(instruments, "compare_candidate_stems", fail)
     updated = instruments.run_occurrence_instruments(
-        sample(), None, None, Settings(), separator=SimpleNamespace()
+        sample(),
+        None,
+        None,
+        Settings(),
+        separator=SimpleNamespace(),
     )
     assert len(calls) == 1
     assert updated.instrument_occurrences[0].status == "failed"
-    assert updated.instrument_occurrences[1].status == "pending"
+    assert updated.instrument_occurrences[1].status == "failed"
+    assert updated.instrument_occurrences[2].status == "no_source"
+    assert instruments.instrument_check_complete(updated)
     assert instruments.instrument_prefill(updated) == {}
 
 
-def test_zero_budget_and_unknown_sources_do_not_load_demucs(monkeypatch):
+def test_zero_budget_does_not_load_demucs_and_returns_terminal_group_rows(monkeypatch):
     def fail(**kwargs):
         raise AssertionError("must not load model")
 
     monkeypatch.setattr(instruments, "DemucsSeparator", fail)
     result = instruments.run_occurrence_instruments(
-        sample(), None, None, Settings(), budget_seconds=0
+        sample(),
+        None,
+        None,
+        Settings(),
+        budget_seconds=0,
     )
-    assert [r.status for r in result.instrument_occurrences] == [
-        "pending",
-        "pending",
-        "too_short",
+    assert [row.status for row in result.instrument_occurrences] == [
+        "failed",
+        "failed",
         "no_source",
     ]
+    assert instruments.instrument_check_complete(result)
+    progress = instruments.instrument_progress(result)
+    assert progress["total"] == 3
+    assert progress["represented_uses"] == 4

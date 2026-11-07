@@ -9,25 +9,23 @@ try {
 }
 
 const root = path.resolve(__dirname, "../..");
-const controls = (progress, label, extra = "") => `
+const controls = () => `
   <section id="instruments">
     <h2>Instruments at each moment</h2>
     <p class="muted">Estimate stems for each matched moment.</p>
-    <p role="status">${progress}</p>
-    ${extra}
-    <button data-action="stems">${label}</button>
+    <p role="status">0 of 2 moments compared.</p>
+    <button data-action="stems">Run instrument check</button>
   </section>`;
 const html = `<!doctype html>
 <html>
   <head><meta charset="utf-8"></head>
   <body>
-    <section id="view">${controls("0 of 2 moments compared.", "Run instrument check")}</section>
+    <section id="view">${controls()}</section>
     <script>
-      window.__LASTRADA_FORCE_AUTO_INSTRUMENTS__ = true;
-      window.automaticInstrumentClicks = 0;
+      window.instrumentClicks = 0;
       document.addEventListener("click", (event) => {
         if (event.target.closest('button[data-action="stems"]'))
-          window.automaticInstrumentClicks += 1;
+          window.instrumentClicks += 1;
       });
     </script>
     <script type="module" src="/auto-instruments.js"></script>
@@ -61,48 +59,37 @@ const server = http.createServer((request, response) => {
   try {
     const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.waitForFunction(() => window.automaticInstrumentClicks === 1);
-
-    const firstHidden = await page
-      .locator('button[data-action="stems"]')
-      .getAttribute("hidden");
-    if (firstHidden === null)
-      throw Error("The manual instrument action was not hidden");
-
-    const automaticCopy = await page.locator("#instruments p.muted").textContent();
-    if (!/automatically/i.test(automaticCopy || ""))
-      throw Error("Automatic analysis copy was not shown");
-
-    await page.evaluate((markup) => {
-      document.querySelector("#view").innerHTML = markup;
-    }, controls("0 of 2 moments compared.", "Run instrument check"));
-    await page.waitForTimeout(350);
-    if ((await page.evaluate(() => window.automaticInstrumentClicks)) !== 1)
-      throw Error("The same automatic pass was started twice");
-
-    await page.evaluate((markup) => {
-      document.querySelector("#view").innerHTML = markup;
-    }, controls("1 of 2 moments compared.", "Continue instrument checks"));
-    await page.waitForFunction(() => window.automaticInstrumentClicks === 2);
-
-    const failureMarkup = controls(
-      "1 of 2 moments compared.",
-      "Try instrument check again",
-      '<p class="warning">The instrument check could not finish.</p>',
+    await page.waitForFunction(
+      () => document.querySelector("#instruments")?.hidden === true,
     );
-    await page.evaluate((markup) => {
-      document.querySelector("#view").innerHTML = markup;
-    }, failureMarkup);
-    await page.waitForFunction(() => window.automaticInstrumentClicks === 3);
+    await page.waitForTimeout(200);
+
+    if ((await page.evaluate(() => window.instrumentClicks)) !== 0)
+      throw Error("The browser launched a post-page-load stem job");
+
+    const button = page.locator('button[data-action="stems"]');
+    if (!(await button.isHidden()))
+      throw Error("The legacy manual instrument action is still visible");
+    if (!(await button.isDisabled()))
+      throw Error("The legacy manual instrument action is still enabled");
+
+    const integrated = await page
+      .locator("#instruments")
+      .getAttribute("data-integrated-stem-pipeline");
+    if (integrated !== "true")
+      throw Error("The controls were not marked as part of the integrated pipeline");
 
     await page.evaluate((markup) => {
       document.querySelector("#view").innerHTML = markup;
-    }, failureMarkup);
-    await page.waitForTimeout(350);
-    if ((await page.evaluate(() => window.automaticInstrumentClicks)) !== 3)
-      throw Error("An unchanged failed pass retried indefinitely");
+    }, controls());
+    await page.waitForFunction(
+      () => document.querySelector("#instruments")?.hidden === true,
+    );
+    await page.waitForTimeout(200);
+    if ((await page.evaluate(() => window.instrumentClicks)) !== 0)
+      throw Error("A DOM refresh launched a stem job");
 
-    console.log("Automatic instrument launch tests passed");
+    console.log("Integrated stem flow browser test passed");
   } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));

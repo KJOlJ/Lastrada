@@ -123,6 +123,9 @@ export function summarizeRelationshipEvidence(family, rows = []) {
   const failed = matchedRows.filter((row) => row.status === "failed").length;
   const tooShort = matchedRows.filter((row) => row.status === "too_short").length;
   const noSource = matchedRows.filter((row) => row.status === "no_source").length;
+  const representedUses = Number.isFinite(family.occurrenceCount)
+    ? family.occurrenceCount
+    : Math.max(1, matchedRows.length);
   const pairs = new Map();
 
   checkedRows.forEach((row, rowIndex) => {
@@ -135,7 +138,7 @@ export function summarizeRelationshipEvidence(family, rows = []) {
         newStem,
         result: "rejected",
         ratios: [],
-        moments: new Set(),
+        representatives: new Set(),
         interpretation: "",
       };
       if (resultRank(evidence.dtw_result) > resultRank(current.result)) {
@@ -144,7 +147,7 @@ export function summarizeRelationshipEvidence(family, rows = []) {
       }
       if (Number.isFinite(evidence.duration_ratio))
         current.ratios.push(evidence.duration_ratio);
-      current.moments.add(row.occurrence_id || `${rowIndex}`);
+      current.representatives.add(row.occurrence_id || `${rowIndex}`);
       pairs.set(key, current);
     }
   });
@@ -155,7 +158,8 @@ export function summarizeRelationshipEvidence(family, rows = []) {
       newStem: entry.newStem,
       result: entry.result,
       durationRatio: median(entry.ratios),
-      momentCount: entry.moments.size,
+      momentCount: representedUses,
+      representativeCount: entry.representatives.size,
       interpretation: entry.interpretation,
     }))
     .sort(
@@ -173,6 +177,7 @@ export function summarizeRelationshipEvidence(family, rows = []) {
     failed,
     tooShort,
     noSource,
+    representedUses,
     entries,
   };
 }
@@ -181,47 +186,66 @@ function evidenceEntryHtml(entry) {
   const ratio = Number.isFinite(entry.durationRatio)
     ? `${entry.durationRatio.toFixed(2)}× duration`
     : "";
-  const moments = `${entry.momentCount} ${entry.momentCount === 1 ? "moment" : "moments"}`;
-  const detail = [ratio, moments].filter(Boolean).join(" · ");
+  const uses = `${entry.momentCount} grouped ${
+    entry.momentCount === 1 ? "use" : "uses"
+  }`;
+  const detail = [ratio, uses].filter(Boolean).join(" · ");
   return `<div class="stemEvidenceItem">
-    <div><strong>${esc(titleCase(entry.sourceStem))} → ${esc(titleCase(entry.newStem))}</strong><span class="dtwResult ${esc(entry.result)}">${esc(titleCase(entry.result))}</span></div>
+    <div><strong>${esc(titleCase(entry.sourceStem))} → ${esc(
+      titleCase(entry.newStem),
+    )}</strong><span class="dtwResult ${esc(entry.result)}">${esc(
+      titleCase(entry.result),
+    )}</span></div>
     ${detail ? `<small>${esc(detail)}</small>` : ""}
   </div>`;
 }
 
 function evidenceHtml(family) {
   const summary = summarizeRelationshipEvidence(family, latestInstrumentRows);
-  const assessable = Math.max(
-    0,
-    summary.matchedCount - summary.tooShort - summary.noSource,
-  );
   let body;
   if (!summary.matchedCount) {
-    body = '<span class="evidenceState">Not checked</span><small>No matching stem result is stored for this relationship.</small>';
+    body =
+      '<span class="evidenceState">Unavailable</span><small>No grouped representative comparison is stored for this relationship.</small>';
   } else if (!summary.checkedCount && summary.tooShort === summary.matchedCount) {
-    body = '<span class="evidenceState">Too short to assess</span><small>Demucs requires at least two seconds of paired audio.</small>';
+    body =
+      '<span class="evidenceState">Too short to assess</span><small>No paired representative in this group was at least two seconds.</small>';
+  } else if (!summary.checkedCount && summary.noSource === summary.matchedCount) {
+    body =
+      '<span class="evidenceState">Original time unavailable</span><small>A representative comparison requires paired original and derivative timestamps.</small>';
   } else if (!summary.checkedCount && summary.failed) {
-    body = '<span class="evidenceState">Check failed</span><small>Retry the stem + DTW check above.</small>';
+    body =
+      '<span class="evidenceState">Integrated check unavailable</span><small>Sony and full-mix DTW timestamp evidence is still preserved.</small>';
   } else if (!summary.checkedCount) {
-    body = '<span class="evidenceState">Not checked</span><small>Run the stem + DTW check above.</small>';
+    body =
+      '<span class="evidenceState">Not completed</span><small>The integrated representative comparison did not finish.</small>';
   } else if (!summary.entries.length) {
     body = '<span class="evidenceState">No reliable stem alignment</span>';
   } else {
     const visible = summary.entries.slice(0, 4);
     const remaining = summary.entries.slice(4);
-    body = `<div class="stemEvidenceList">${visible.map(evidenceEntryHtml).join("")}</div>`;
+    body = `<div class="stemEvidenceList">${visible
+      .map(evidenceEntryHtml)
+      .join("")}</div>`;
     if (remaining.length)
-      body += `<details class="moreStemEvidence"><summary>View ${remaining.length} more stem result${remaining.length === 1 ? "" : "s"}</summary><div class="stemEvidenceList">${remaining.map(evidenceEntryHtml).join("")}</div></details>`;
+      body += `<details class="moreStemEvidence"><summary>View ${
+        remaining.length
+      } more stem result${
+        remaining.length === 1 ? "" : "s"
+      }</summary><div class="stemEvidenceList">${remaining
+        .map(evidenceEntryHtml)
+        .join("")}</div></details>`;
   }
-  const progress = assessable
-    ? `${summary.checkedCount} of ${assessable} eligible matched moments checked`
-    : `${summary.checkedCount} matched moments checked`;
-  const exclusions = [
-    summary.tooShort ? `${summary.tooShort} too short` : "",
-    summary.noSource ? `${summary.noSource} missing original time` : "",
-    summary.pending ? `${summary.pending} pending` : "",
-  ].filter(Boolean);
-  return `${body}<small class="evidenceProgress">${esc(progress)}${exclusions.length ? ` · ${esc(exclusions.join(" · "))}` : ""}</small>`;
+
+  const progress = summary.checkedCount
+    ? `${summary.checkedCount} representative comparison${
+        summary.checkedCount === 1 ? "" : "s"
+      } completed for ${summary.representedUses} grouped ${
+        summary.representedUses === 1 ? "use" : "uses"
+      }`
+    : `${summary.representedUses} grouped ${
+        summary.representedUses === 1 ? "use" : "uses"
+      }`;
+  return `${body}<small class="evidenceProgress">${esc(progress)}</small>`;
 }
 
 function readNumber(cell) {
@@ -274,7 +298,7 @@ function enrichRelationshipTable(track) {
 
   table.setAttribute(
     "aria-label",
-    "Sample relationships with Demucs stem and DTW evidence",
+    "Sample relationships with grouped Demucs stem and DTW evidence",
   );
   const header = table.tHead?.rows?.[0];
   if (header && !header.querySelector("[data-stem-dtw-heading]")) {
@@ -311,7 +335,7 @@ function enrichRelationshipTable(track) {
       heading.textContent = "Stem + DTW evidence";
     const description = controls.querySelector("p.muted");
     const descriptionText =
-      "Demucs estimates the stem used at each matched moment, then stem-level DTW tests whether that element aligns. Results appear in the final column below.";
+      "Demucs and same-stem DTW ran inside the original analysis. One representative pair was checked for each grouped timestamp relationship, and the evidence appears in the final column.";
     if (description && description.textContent !== descriptionText)
       description.textContent = descriptionText;
   }
