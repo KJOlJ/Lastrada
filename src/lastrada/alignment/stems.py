@@ -48,13 +48,6 @@ class StemComparisonResult:
 
     @property
     def best(self) -> StemPairEvidence | None:
-        # Prefer a separated accepted pair over the full-mix baseline.
-        for item in self.evidence:
-            if item.accepted and (
-                item.source_stem != "full_mix"
-                or item.derivative_stem != "full_mix"
-            ):
-                return item
         for item in self.evidence:
             if item.accepted:
                 return item
@@ -67,24 +60,17 @@ def candidate_stem_pairs(
     *,
     include_cross_other: bool = False,
 ):
-    """Return only like-for-like stem pairs that exist in both recordings.
+    """Return only like-for-like separated stem pairs present in both songs.
 
     ``include_cross_other`` remains in the signature for backwards compatibility,
-    but it is intentionally ignored. Cross-stem comparisons waste compute and are
-    not used as supporting evidence in the production workflow.
+    but it is intentionally ignored. Cross-stem comparisons and the redundant
+    full-mix baseline are excluded from this Demucs stage. Full-mix DTW already
+    happens earlier in the candidate-timing pipeline.
     """
     del include_cross_other
     source = set(source_stems)
     derivative = set(derivative_stems)
-    preferred_order = [
-        "full_mix",
-        "guitar",
-        "piano",
-        "bass",
-        "drums",
-        "vocals",
-        "other",
-    ]
+    preferred_order = ["guitar", "piano", "bass", "drums", "vocals", "other"]
     return [
         (stem, stem)
         for stem in preferred_order
