@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: cloud-run-lastrada-alt
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
