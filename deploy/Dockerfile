@@ -17,4 +17,4 @@ RUN --mount=type=secret,id=build_ca,mode=0444 \
 COPY configs configs
 RUN chmod -R a+rX /app
 USER 65532:65532
-CMD ["sh", "-c", "exec uvicorn lastrada.web.server:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "exec uvicorn lastrada.web.production:app --host 0.0.0.0 --port ${PORT:-8080}"]
