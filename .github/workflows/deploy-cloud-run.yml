@@ -1,0 +1,122 @@
+name: Deploy Lastrada Cloud Run
+
+on:
+  push:
+    branches: [feat/firebase-web]
+    paths:
+      - src/**
+      - deploy/Dockerfile
+      - deploy/requirements-api.txt
+      - deploy/requirements-worker.txt
+      - pyproject.toml
+      - configs/**
+      - .github/workflows/deploy-cloud-run.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-run-lastrada-alt
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PROJECT_ID: lastrada-64bab
+      REGION: us-central1
+      REPOSITORY: lastrada
+    steps:
+      - name: Check out backend
+        uses: actions/checkout@v4
+
+      - name: Select Google Cloud credentials
+        shell: bash
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LASTRADA_64BAB || secrets.FIREBASE_SERVICE_ACCOUNT || secrets.GCP_SA_KEY || secrets.GOOGLE_CREDENTIALS || secrets.GCP_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_CREDENTIALS_JSON}" ]; then
+            echo "A service-account JSON secret is required for Cloud Run deployment." >&2
+            exit 1
+          fi
+          printf '%s' "${GOOGLE_CREDENTIALS_JSON}" > "${RUNNER_TEMP}/google-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/google-service-account.json" >> "${GITHUB_ENV}"
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: lastrada-64bab
+
+      - name: Authenticate Docker and Google Cloud
+        run: |
+          set -euo pipefail
+          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+          gcloud config set project "${PROJECT_ID}"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push backend image
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/app:${GITHUB_SHA}"
+          echo "LASTRADA_IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+          DOCKER_BUILDKIT=1 docker build \
+            --file deploy/Dockerfile \
+            --tag "${IMAGE}" \
+            .
+          docker push "${IMAGE}"
+
+      - name: Deploy worker
+        run: |
+          set -euo pipefail
+          gcloud run services update lastrada-worker \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --image "${LASTRADA_IMAGE}" \
+            --quiet
+
+      - name: Deploy API
+        run: |
+          set -euo pipefail
+          gcloud run services update lastrada-api \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --image "${LASTRADA_IMAGE}" \
+            --quiet
+
+      - name: Verify deployed services
+        run: |
+          set -euo pipefail
+          WORKER_IMAGE="$(gcloud run services describe lastrada-worker \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --format='value(spec.template.spec.containers[0].image)')"
+          API_IMAGE="$(gcloud run services describe lastrada-api \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --format='value(spec.template.spec.containers[0].image)')"
+          test "${WORKER_IMAGE}" = "${LASTRADA_IMAGE}"
+          test "${API_IMAGE}" = "${LASTRADA_IMAGE}"
+
+          API_URL="$(gcloud run services describe lastrada-api \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --format='value(status.url)')"
+          curl --fail --silent --show-error --retry 10 --retry-delay 5 \
+            "${API_URL}/health" \
+            --output /tmp/health.json
+          python -m json.tool /tmp/health.json >/dev/null
+          grep -q '"status": "ok"' /tmp/health.json
+
+          {
+            echo "### Cloud Run backend deployed"
+            echo ""
+            echo "Image: \`${LASTRADA_IMAGE}\`"
+            echo ""
+            echo "Services: \`lastrada-api\`, \`lastrada-worker\`"
+            echo ""
+            echo "Production stem comparisons are like-for-like only."
+            echo "New web analyses use the master-recording sample scope."
+          } >> "${GITHUB_STEP_SUMMARY}"

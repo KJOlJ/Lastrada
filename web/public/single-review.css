@@ -1,0 +1,277 @@
+/* One-page master-sample review after timestamp confirmation. */
+
+.singleNatureReview {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+body:has(.singleNatureReview) main {
+  max-width: 1180px;
+}
+
+.singleReviewHeader,
+.sectionHeading,
+.singleReviewActions,
+.draftTools {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.singleReviewHeader h1,
+.sectionHeading h2 {
+  margin: 4px 0 8px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.reviewStateBadge {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-size: 13px;
+  font-weight: 750;
+  background: var(--surface);
+}
+
+.singleAnalysisStatus {
+  margin: 20px 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+}
+
+.singleAnalysisStatus.complete {
+  border-color: color-mix(in srgb, #38d39f 42%, var(--border));
+}
+
+.summaryStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0 28px;
+}
+
+.summaryStats article {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--surface);
+}
+
+.summaryStats strong,
+.summaryStats span,
+.summaryStats small {
+  display: block;
+}
+
+.summaryStats strong {
+  overflow-wrap: anywhere;
+  font-size: clamp(20px, 2.2vw, 29px);
+  line-height: 1.12;
+  margin-bottom: 8px;
+}
+
+.summaryStats span {
+  font-weight: 700;
+}
+
+.summaryStats small {
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.singleReviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+
+.singleSections {
+  margin: 8px 0 28px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 15px 17px;
+}
+
+.singleSections legend {
+  padding: 0 7px;
+  font-weight: 750;
+}
+
+.singleSections > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+}
+
+.singleSections label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.singleSections input {
+  margin: 0 7px 0 0;
+}
+
+.singleEvidence {
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  padding: 18px;
+  margin: 18px 0 24px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.sectionHeading > span {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.singleRelationshipWrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.singleRelationshipTable {
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.singleRelationshipTable th:nth-child(1) {
+  width: 17%;
+}
+
+.singleRelationshipTable th:nth-child(2) {
+  width: 38%;
+}
+
+.singleRelationshipTable th:nth-child(3) {
+  width: 18%;
+}
+
+.singleRelationshipTable th:nth-child(4) {
+  width: 27%;
+}
+
+.singleRelationshipTable td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.singleRelationshipTable td small {
+  display: block;
+  margin-top: 4px;
+}
+
+.draftNarrative textarea {
+  min-height: 230px;
+  line-height: 1.55;
+}
+
+.draftTools {
+  align-items: end;
+  display: grid;
+  grid-template-columns: auto minmax(180px, 0.7fr) minmax(260px, 1.3fr);
+  margin: 4px 0 24px;
+}
+
+.draftTools button {
+  margin-bottom: 17px;
+}
+
+.singleReviewActions {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  padding-top: 22px;
+  margin-top: 12px;
+}
+
+.singleReviewActions button.primary {
+  margin-left: auto;
+}
+
+.singleDisclaimer {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 20px;
+}
+
+.masterAssumption {
+  border-left: 3px solid #6ea8ff;
+  padding: 9px 13px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+@media (max-width: 850px) {
+  .summaryStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .draftTools {
+    grid-template-columns: 1fr;
+  }
+
+  .draftTools button {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 620px) {
+  .singleReviewHeader,
+  .sectionHeading,
+  .singleReviewActions {
+    display: block;
+  }
+
+  .reviewStateBadge {
+    display: inline-block;
+    margin-top: 8px;
+  }
+
+  .summaryStats,
+  .singleReviewGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .sectionHeading > span {
+    display: block;
+    text-align: left;
+  }
+
+  .singleReviewActions button {
+    width: 100%;
+    margin: 8px 0;
+  }
+}
+
+@media print {
+  header,
+  footer,
+  #notice,
+  #progress,
+  .singleReviewActions,
+  .draftTools,
+  .singleDisclaimer {
+    display: none !important;
+  }
+
+  body,
+  main {
+    background: #fff !important;
+    color: #111 !important;
+    max-width: none !important;
+    margin: 0 !important;
+  }
+}

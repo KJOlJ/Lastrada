@@ -1,4 +1,4 @@
-"""Compare candidate regions across estimated Demucs stems.
+"""Compare candidate regions across like-for-like estimated Demucs stems.
 
 Stem labels and audio are model estimates. Results are supporting evidence only;
 they do not establish that the sampled element is definitively guitar, vocals,
@@ -48,8 +48,7 @@ class StemComparisonResult:
 
     @property
     def best(self) -> StemPairEvidence | None:
-        # For listening, prefer a separated accepted pair over the full-mix
-        # baseline. The complete table still shows every ordered pair.
+        # Prefer a separated accepted pair over the full-mix baseline.
         for item in self.evidence:
             if item.accepted and (
                 item.source_stem != "full_mix"
@@ -66,13 +65,17 @@ def candidate_stem_pairs(
     source_stems,
     derivative_stems,
     *,
-    include_cross_other: bool = True,
+    include_cross_other: bool = False,
 ):
-    """Return conservative stem pairs, avoiding an all-by-all explosion."""
+    """Return only like-for-like stem pairs that exist in both recordings.
+
+    ``include_cross_other`` remains in the signature for backwards compatibility,
+    but it is intentionally ignored. Cross-stem comparisons waste compute and are
+    not used as supporting evidence in the production workflow.
+    """
+    del include_cross_other
     source = set(source_stems)
     derivative = set(derivative_stems)
-    ordered = []
-
     preferred_order = [
         "full_mix",
         "guitar",
@@ -82,22 +85,11 @@ def candidate_stem_pairs(
         "vocals",
         "other",
     ]
-    for stem in preferred_order:
-        if stem in source and stem in derivative:
-            ordered.append((stem, stem))
-
-    if include_cross_other:
-        cross_pairs = [
-            ("guitar", "other"),
-            ("other", "guitar"),
-            ("piano", "other"),
-            ("other", "piano"),
-        ]
-        for pair in cross_pairs:
-            if pair[0] in source and pair[1] in derivative and pair not in ordered:
-                ordered.append(pair)
-
-    return ordered
+    return [
+        (stem, stem)
+        for stem in preferred_order
+        if stem in source and stem in derivative
+    ]
 
 
 def compare_candidate_stems(
@@ -112,9 +104,9 @@ def compare_candidate_stems(
     minimum_duration_ratio: float = 0.5,
     maximum_duration_ratio: float = 1.5,
     minimum_duration: float = 0.5,
-    include_cross_other: bool = True,
+    include_cross_other: bool = False,
 ) -> StemComparisonResult:
-    """Separate both candidate regions and run guarded DTW on selected stem pairs."""
+    """Separate both regions and run guarded DTW on matching stem labels only."""
     if interval.original_start is None or interval.original_end is None:
         raise ValueError("Stem comparison requires source timestamps")
 
@@ -183,20 +175,16 @@ def compare_candidate_stems(
                 refined_new_start=float(refined_start),
                 refined_new_end=float(refined_end),
                 refined_duration=float(refined_duration),
-                same_label=source_stem == derivative_stem,
+                same_label=True,
                 sony_similarity=interval.similarity,
             )
         )
 
-    # Accepted results first; among those, same-label evidence and lower DTW cost
-    # rank higher. This is only an ordering rule, not a confidence calculation.
     evidence.sort(
         key=lambda item: (
             not item.accepted,
-            not item.same_label,
             float("inf") if item.mean_dtw_cost is None else item.mean_dtw_cost,
             item.source_stem,
-            item.derivative_stem,
         )
     )
     return StemComparisonResult(source_region, derivative_region, evidence)

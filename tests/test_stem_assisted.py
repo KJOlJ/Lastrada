@@ -16,19 +16,25 @@ def _audio(seconds=12.0, sample_rate=16000):
     return Audio(samples, sample_rate, seconds)
 
 
-def test_candidate_pairs_prioritize_matching_labels_and_selected_cross_pairs():
-    source = {"full_mix", "guitar", "other", "vocals"}
-    derivative = {"full_mix", "guitar", "other", "vocals"}
-    pairs = candidate_stem_pairs(source, derivative)
-
-    assert pairs[:4] == [
+def test_candidate_pairs_are_like_for_like_only():
+    source = {"full_mix", "guitar", "other", "vocals", "drums"}
+    derivative = {"full_mix", "guitar", "other", "vocals", "drums"}
+    expected = [
         ("full_mix", "full_mix"),
         ("guitar", "guitar"),
+        ("drums", "drums"),
         ("vocals", "vocals"),
         ("other", "other"),
     ]
-    assert ("guitar", "other") in pairs
-    assert ("other", "guitar") in pairs
+
+    assert candidate_stem_pairs(source, derivative) == expected
+    # The compatibility flag can no longer re-enable cross-stem compute.
+    assert candidate_stem_pairs(
+        source,
+        derivative,
+        include_cross_other=True,
+    ) == expected
+    assert all(left == right for left, right in expected)
 
 
 def test_demucs_segment_is_normalized_for_integer_only_cli(monkeypatch, tmp_path):
@@ -110,3 +116,4 @@ def test_stem_comparison_maps_local_alignment_back_to_song_time(monkeypatch, tmp
     assert result.best.refined_new_end == 54.5
     assert result.best.pitch_shift_semitones == -2
     assert result.best.sony_similarity == 0.95
+    assert all(item.source_stem == item.derivative_stem for item in result.evidence)

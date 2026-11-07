@@ -63,7 +63,8 @@ def execute(owner, analysis_id, operation, task_id):
         for role in ("original", "new"):
             paths[role] = Path(folder) / role
             repo.download(root + f"/{role}", paths[role])
-        original, new = decode(paths["original"].read_bytes()), decode(paths["new"].read_bytes())
+        original = decode(paths["original"].read_bytes())
+        new = decode(paths["new"].read_bytes())
         settings = Settings(stem_enabled=False, stem_max_candidates=1, stem_model_name="htdemucs")
         if operation == "stems":
             data, _ = repo.read(root + "/result.json")
@@ -97,7 +98,10 @@ def execute(owner, analysis_id, operation, task_id):
                     artist=credits["new_artist"],
                     audio_file=state["uploads"]["new"]["name"],
                 ),
-                analysis_scope=["master", "publishing"],
+                # The web product now assumes the uploaded source master was sampled.
+                # Publishing and replay analysis remain available in the core library,
+                # but are intentionally outside this streamlined client workflow.
+                analysis_scope=["master"],
             )
             adapter, warning = None, None
             try:
@@ -107,7 +111,10 @@ def execute(owner, analysis_id, operation, task_id):
                     batch_size=2,
                 )
             except Exception:
-                warning = "Sony matching is unavailable; displayed times are PF-NMF fallback estimates. Original-track positions may be unknown."
+                warning = (
+                    "Sony matching is unavailable; displayed times are PF-NMF fallback "
+                    "estimates. Original-track positions may be unknown."
+                )
             result = analyze_pair(intake, original, new, adapter=adapter, settings=settings)
             adapter = None
             if warning:
